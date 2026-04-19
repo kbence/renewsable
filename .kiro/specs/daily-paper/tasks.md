@@ -2,7 +2,7 @@
 
 ## 1. Foundation: package scaffolding and cross-cutting utilities
 
-- [ ] 1.1 Create Python package scaffold with pinned dependencies
+- [x] 1.1 Create Python package scaffold with pinned dependencies
   - Add `pyproject.toml` declaring the `renewsable` package with `src/` layout, Python ≥ 3.11, `click ≥ 8.1` and `goosepaper == 0.7.1` as runtime deps, `pytest` as dev dep
   - Register the `renewsable` console-script entrypoint pointing at the CLI group
   - Add `src/renewsable/__init__.py` exposing a `__version__` constant and `src/renewsable/__main__.py` delegating to the CLI
@@ -181,3 +181,7 @@
   - Observable: a checklist pass recorded in the README troubleshooting/verification section with the command output excerpts
   - _Requirements: 3.2, 5.1, 5.3, 5.4, 6.5, 8.1, 8.2_
   - _Depends: 3.1, 4.1, 4.2_
+
+## Implementation Notes
+
+- **goosepaper dependency**: PyPI `goosepaper==0.7.1` does not exist (only 0.7.0, which has a broken sdist missing `requirements.txt`). Pin via git tag: `goosepaper @ git+https://github.com/j6k4m8/goosepaper@v0.7.1`. Confirmed installable on Python 3.11 macOS arm64 with `rmapy` as a transitive runtime import (goosepaper's `__main__` imports upload.py which imports rmapy). `rmapy` must be installed even though we never use goosepaper's upload path.

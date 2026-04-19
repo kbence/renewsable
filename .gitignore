@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+*.egg
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Output PDFs from manual runs
+renewsable-*.pdf
+
+# OS
+.DS_Store

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "renewsable"
+version = "0.1.0"
+description = "Daily news digest PDF pipeline for reMarkable 2, scheduled on a Raspberry Pi."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "bnc" }]
+dependencies = [
+    "click>=8.1",
+    # PyPI goosepaper==0.7.1 does not exist; 0.7.0 has a broken sdist.
+    # Pin via git tag per spec task 1.1 implementation notes.
+    "goosepaper @ git+https://github.com/j6k4m8/goosepaper@v0.7.1",
+    # goosepaper's __main__ eagerly imports rmapy (legacy upload client) but
+    # does not declare it. We never use that code path, but importing
+    # goosepaper via `goosepaper --help` fails without it. Declared here
+    # so the transitive import resolves on the Pi.
+    "rmapy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+renewsable = "renewsable.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
