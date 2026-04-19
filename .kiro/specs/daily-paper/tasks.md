@@ -22,7 +22,7 @@
   - Observable: unit calls with `XDG_CONFIG_HOME=/tmp/x` return paths rooted at `/tmp/x`; with the env unset they return paths rooted at `~/.config` / `~/.local/state`
   - _Requirements: 1.1, 5.1, 8.2_
 
-- [ ] 1.4 Implement logging setup with file + stderr sinks and redaction filter
+- [x] 1.4 Implement logging setup with file + stderr sinks and redaction filter
   - Configure a `RotatingFileHandler` at the default log path (14 backups, daily rotation) plus a stderr `StreamHandler` that journald captures under user units
   - Install a filter that masks substrings matching 8-character uppercase pairing codes and rmapi token prefixes with `***`
   - Expose `configure_logging(config)` called once from the CLI before any component runs
@@ -185,3 +185,5 @@
 ## Implementation Notes
 
 - **goosepaper dependency**: PyPI `goosepaper==0.7.1` does not exist (only 0.7.0, which has a broken sdist missing `requirements.txt`). Pin via git tag: `goosepaper @ git+https://github.com/j6k4m8/goosepaper@v0.7.1`. Confirmed installable on Python 3.11 macOS arm64 with `rmapy` as a transitive runtime import (goosepaper's `__main__` imports upload.py which imports rmapy). `rmapy` must be installed even though we never use goosepaper's upload path.
+- **Rotation primitive**: `TimedRotatingFileHandler(when='midnight', interval=1, backupCount=14)` satisfies "14 days of runs" (Req 8.2) better than size-based `RotatingFileHandler` suggested in task 1.4 text. Deviation documented in `src/renewsable/logging_setup.py` docstring.
+- **Filter placement**: Redaction filter must be attached to each handler, not the logger, so filters run after record formatting across thread boundaries.
