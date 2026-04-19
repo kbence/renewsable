@@ -10,7 +10,7 @@
   - Observable: `pip install -e .` succeeds in a fresh venv and `renewsable --help` prints the Click group usage (placeholder OK)
   - _Requirements: 10.1, 10.2_
 
-- [ ] 1.2 Define the exception hierarchy
+- [x] 1.2 Define the exception hierarchy
   - Implement `RenewsableError` base with `ConfigError`, `BuildError`, `UploadError`, `PairingError`, `ScheduleError` subclasses
   - Each exception carries `message` and optional `remediation` fields; string representation includes both when present
   - Observable: importing each subclass from `renewsable.errors` succeeds and `str(ConfigError("x", remediation="y"))` contains both "x" and "y"
