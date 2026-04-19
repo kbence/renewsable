@@ -16,7 +16,7 @@
   - Observable: importing each subclass from `renewsable.errors` succeeds and `str(ConfigError("x", remediation="y"))` contains both "x" and "y"
   - _Requirements: 1.3, 1.4, 4.4, 6.4, 10.5_
 
-- [ ] 1.3 Implement path resolution helpers
+- [x] 1.3 Implement path resolution helpers
   - Implement default-location resolvers honouring `$XDG_CONFIG_HOME` and `$XDG_STATE_HOME` with `~/.config` / `~/.local/state` fallbacks
   - Expose helpers for: default config path, default output dir, default log dir, systemd user-unit dir, rmapi config file path
   - Observable: unit calls with `XDG_CONFIG_HOME=/tmp/x` return paths rooted at `/tmp/x`; with the env unset they return paths rooted at `~/.config` / `~/.local/state`
