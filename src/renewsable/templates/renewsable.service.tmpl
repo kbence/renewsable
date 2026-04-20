@@ -1,0 +1,8 @@
+[Unit]
+Description=renewsable daily paper
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$exe_path run
+Environment=HOME=$home

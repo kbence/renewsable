@@ -1,0 +1,10 @@
+[Unit]
+Description=renewsable daily timer
+
+[Timer]
+OnCalendar=*-*-* $schedule_time:00
+Persistent=true
+Unit=renewsable.service
+
+[Install]
+WantedBy=timers.target

@@ -40,7 +40,7 @@
   - _Boundary: Config_
   - _Depends: 1.2, 1.3_
 
-- [ ] 2.2 (P) Scheduler: render and install/uninstall systemd user units
+- [x] 2.2 (P) Scheduler: render and install/uninstall systemd user units
   - Add `templates/renewsable.service.tmpl` and `templates/renewsable.timer.tmpl` in the package, using `string.Template` placeholders for `exe_path`, `home`, `schedule_time`
   - Implement `Scheduler.install()` rendering both units into the systemd user directory, running `systemctl --user daemon-reload`, then `systemctl --user enable --now renewsable.timer`; idempotent on re-run
   - Implement `Scheduler.uninstall()` running `systemctl --user disable --now renewsable.timer`, deleting the unit files, then `daemon-reload`; idempotent when already uninstalled
