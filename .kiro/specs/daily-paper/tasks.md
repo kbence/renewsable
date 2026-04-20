@@ -50,7 +50,7 @@
   - _Boundary: Scheduler_
   - _Depends: 1.2, 1.3, 2.1_
 
-- [ ] 2.3 (P) Pairing helper for first-run rmapi setup
+- [x] 2.3 (P) Pairing helper for first-run rmapi setup
   - Implement `Pairing.is_paired()` checking for a non-empty rmapi config file at the resolved path
   - Implement `Pairing.pair(force=False)` that returns early when `is_paired()` unless `force=True`, otherwise spawns `rmapi` with inherited stdin/stdout/stderr so the user enters the one-time code directly
   - After the spawn exits, verify the token file is now present; raise `PairingError` with a remediation hint otherwise
