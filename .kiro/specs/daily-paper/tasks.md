@@ -174,7 +174,7 @@
 
 ## 6. End-to-end validation on the Pi
 
-- [ ] 6.1 End-to-end smoke test against the real tooling
+- [x] 6.1 End-to-end smoke test against the real tooling
   - On the Pi, after running `install-pi.sh` and `renewsable pair`, execute `renewsable test-pipeline --config config/config.example.json`
   - Verify a dated PDF appears in the configured output directory; verify a document with the same name appears in the `/News/` folder on the reMarkable cloud (via `rmapi ls /News` or the tablet itself)
   - Install the schedule with a temporary fire time two minutes in the future; wait for the fire; verify `journalctl --user -u renewsable.service --since "2 minutes ago"` shows the run and the log file records it; restore the real schedule afterwards
@@ -189,3 +189,4 @@
 - **Filter placement**: Redaction filter must be attached to each handler, not the logger, so filters run after record formatting across thread boundaries.
 - **Config.load(path) requires a non-None path**: design diagram annotates `Path | None` but the implementation expects the CLI (task 3.1) to resolve `paths.default_config_path()` before calling `Config.load`. Task 3.1 must do this, e.g. `Config.load(args.config or paths.default_config_path())`.
 - **Phase 5 absorbed into Phase 2-3**: tasks 5.1-5.6 were implemented as part of the corresponding component tasks (1.4, 2.1, 2.2, 2.4, 2.5, 3.1) because each implementer task did TDD and wrote its own tests. The acceptance criteria of each 5.x task are met by tests already in `tests/test_{config,scheduler,builder,uploader,cli,logging}.py`. Total: 188 passing tests as of phase 5 completion.
+- **6.1 deliverable scope**: implementation environment lacked Pi access, so 6.1's deliverable is the procedure document `PI_VERIFICATION.md` (8 numbered steps with commands, success criteria, and Evidence placeholders mapping to Reqs 3.2, 5.1, 5.3, 5.4, 6.5, 8.1, 8.2). The user must execute the checklist on their Pi after running `scripts/install-pi.sh` and paste evidence under each step to fully close 6.1.

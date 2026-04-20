@@ -207,6 +207,8 @@ renewsable test-pipeline       # verbose (at least INFO), prints progress
 
 - **Wrong config path / `ConfigError: config file not found`** — `renewsable` reads `$XDG_CONFIG_HOME/renewsable/config.json` (falling back to `~/.config/renewsable/config.json`) by default. Override with `--config <path>`. Errors always name the exact file path and the offending field.
 
+- **End-to-end verification on real hardware** — see [`PI_VERIFICATION.md`](./PI_VERIFICATION.md) for the full copy-pasteable checklist (pair, build, upload, `test-pipeline`, schedule fire-test, linger check) used to accept the Pi install.
+
 ## Architecture (one-liner)
 
 Single-process Python orchestrator: `Config → Builder (goosepaper subprocess) → Uploader (rmapi subprocess)`, scheduled by a `systemd --user` timer whose unit files are rendered and installed by the `Scheduler` component. Full design in `.kiro/specs/daily-paper/design.md`; config schema authority in `src/renewsable/config.py` and `config/README.md`.
