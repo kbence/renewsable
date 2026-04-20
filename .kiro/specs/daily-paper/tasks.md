@@ -104,7 +104,7 @@
 
 ## 4. Pi bootstrap and deployment workflow
 
-- [ ] 4.1 Implement the Pi bootstrap script
+- [x] 4.1 Implement the Pi bootstrap script
   - Add `scripts/install-pi.sh` (bash, `set -euo pipefail`) targeting Raspberry Pi OS Bookworm 64-bit
   - Steps: verify 64-bit arch and fail loudly if armhf; `apt install` the WeasyPrint and font package list (`python3-dev python3-pip python3-cffi python3-brotli libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi-dev shared-mime-info fonts-dejavu fonts-noto-core`); create a venv under the project; install the package in editable mode; download the pinned `rmapi-linux-arm64` release tarball, verify checksum, install `rmapi` into the venv `bin/`
   - Print a clear next-steps block instructing the user to run `renewsable pair`, then `renewsable test-pipeline`, then `renewsable install-schedule`, and finally `sudo loginctl enable-linger $USER`
