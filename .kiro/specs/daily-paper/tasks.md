@@ -96,7 +96,7 @@
   - _Requirements: 1.1, 1.3, 4.1, 4.5, 6.5, 10.1, 10.2, 10.3, 10.4, 10.5_
   - _Depends: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 3.2 Ship an example configuration with telex.hu and the English defaults
+- [x] 3.2 Ship an example configuration with telex.hu and the English defaults
   - Add `config/config.example.json` populated with `schedule_time: "05:30"`, `remarkable_folder: "/News"`, `output_dir` absent (use default), and a `stories` array including telex.hu RSS plus BBC World, NYT Homepage, Guardian International, Economist weekly, and Hacker News front page
   - Include inline-commented notes (as README-adjacent documentation, not JSON comments) describing each top-level field and referencing goosepaper's `stories` schema for provider-specific fields
   - Observable: `renewsable build --config config/config.example.json --dry-run` style invocation loads and validates the file without raising `ConfigError`

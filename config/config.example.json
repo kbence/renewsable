@@ -1,0 +1,48 @@
+{
+  "schedule_time": "05:30",
+  "remarkable_folder": "/News",
+  "stories": [
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://telex.hu/rss",
+        "limit": 5
+      }
+    },
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "limit": 5
+      }
+    },
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "limit": 5
+      }
+    },
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://www.theguardian.com/international/rss",
+        "limit": 5
+      }
+    },
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://www.economist.com/the-world-this-week/rss.xml",
+        "limit": 5
+      }
+    },
+    {
+      "provider": "rss",
+      "config": {
+        "rss_path": "https://hnrss.org/frontpage",
+        "limit": 5
+      }
+    }
+  ]
+}
