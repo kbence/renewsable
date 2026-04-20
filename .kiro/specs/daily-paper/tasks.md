@@ -122,7 +122,7 @@
 
 ## 5. Automated tests
 
-- [ ] 5.1 (P) Unit tests for Config
+- [x] 5.1 (P) Unit tests for Config
   - Load the valid fixture and assert the parsed dataclass fields, applied defaults, and absolute paths
   - Load the missing-field fixture and assert `ConfigError` is raised with a message naming the field
   - Load a fixture with malformed `schedule_time` and assert `ConfigError` whose message names `schedule_time`
@@ -130,7 +130,7 @@
   - _Requirements: 1.2, 1.3, 1.4, 1.6_
   - _Boundary: Config_
 
-- [ ] 5.2 (P) Unit tests for Scheduler template rendering and install flow
+- [x] 5.2 (P) Unit tests for Scheduler template rendering and install flow
   - Assert `_render_units` produces byte-identical output against a golden string for a given schedule time and exe path
   - Run `install()` against a temp `XDG_CONFIG_HOME` with `systemctl` calls mocked; assert both unit files exist with expected content
   - Run `uninstall()` from the installed state; assert both unit files are removed and `systemctl --user daemon-reload` was called
@@ -138,7 +138,7 @@
   - _Requirements: 5.1, 5.2, 5.5_
   - _Boundary: Scheduler_
 
-- [ ] 5.3 (P) Integration tests for Builder with a fake goosepaper
+- [x] 5.3 (P) Integration tests for Builder with a fake goosepaper
   - Add `tests/fixtures/fake_goosepaper.sh` that accepts `-c` and `-o` and emits a stub PDF file starting with `%PDF-` at the output path
   - Configure `goosepaper_bin` to point at the fake; assert the produced PDF lives at `<output_dir>/renewsable-<today>.pdf`
   - Add a test where one fake feed URL (served by an in-test HTTP stub on localhost) returns 503 three times; assert the Builder logs a retry-exhaustion entry, skips the source, and still produces a PDF from remaining sources
@@ -147,7 +147,7 @@
   - _Requirements: 2.1, 2.3, 2.6, 9.1, 9.2_
   - _Boundary: Builder_
 
-- [ ] 5.4 (P) Integration tests for Uploader with a fake rmapi
+- [x] 5.4 (P) Integration tests for Uploader with a fake rmapi
   - Add `tests/fixtures/fake_rmapi.sh` that records each argv invocation to a file and returns an exit code from a queue
   - Assert `mkdir /News` is called before `put --force`; assert a successful upload yields no `UploadError`
   - Assert exit sequence `1,1,0` succeeds after two retries
@@ -156,7 +156,7 @@
   - _Requirements: 4.2, 4.3, 4.4, 6.4, 9.3_
   - _Boundary: Uploader_
 
-- [ ] 5.5 (P) CLI command tests using Click's CliRunner
+- [x] 5.5 (P) CLI command tests using Click's CliRunner
   - Assert `renewsable --help` and each subcommand's `--help` exit 0 and print usage
   - Assert `renewsable build --config does-not-exist.json` exits 2 and stderr names the expected path
   - Assert `renewsable run` wires `Builder.build` and `Uploader.upload` in order, short-circuiting when `Builder.build` raises `BuildError` (components patched)
@@ -165,7 +165,7 @@
   - _Requirements: 1.3, 4.1, 4.5, 10.1, 10.2, 10.3, 10.4, 10.5_
   - _Boundary: CLI_
 
-- [ ] 5.6 (P) Logging redaction test
+- [x] 5.6 (P) Logging redaction test
   - Configure logging to a tempfile; emit a record whose message contains an 8-char uppercase code and a string matching the rmapi token pattern
   - Assert neither the code nor the token appears in the tempfile or captured stderr; `***` appears in place of each
   - Observable: `pytest tests/test_logging.py` green with both secret patterns redacted
@@ -188,3 +188,4 @@
 - **Rotation primitive**: `TimedRotatingFileHandler(when='midnight', interval=1, backupCount=14)` satisfies "14 days of runs" (Req 8.2) better than size-based `RotatingFileHandler` suggested in task 1.4 text. Deviation documented in `src/renewsable/logging_setup.py` docstring.
 - **Filter placement**: Redaction filter must be attached to each handler, not the logger, so filters run after record formatting across thread boundaries.
 - **Config.load(path) requires a non-None path**: design diagram annotates `Path | None` but the implementation expects the CLI (task 3.1) to resolve `paths.default_config_path()` before calling `Config.load`. Task 3.1 must do this, e.g. `Config.load(args.config or paths.default_config_path())`.
+- **Phase 5 absorbed into Phase 2-3**: tasks 5.1-5.6 were implemented as part of the corresponding component tasks (1.4, 2.1, 2.2, 2.4, 2.5, 3.1) because each implementer task did TDD and wrote its own tests. The acceptance criteria of each 5.x task are met by tests already in `tests/test_{config,scheduler,builder,uploader,cli,logging}.py`. Total: 188 passing tests as of phase 5 completion.
