@@ -1,0 +1,9 @@
+{
+  "schedule_time": "06:15",
+  "remarkable_folder": "/News",
+  "output_dir": "~/renewsable/out",
+  "stories": [
+    {"provider": "rss", "config": {"rss_path": "https://telex.hu/rss", "limit": 5}},
+    {"provider": "rss", "config": {"rss_path": "https://feeds.bbci.co.uk/news/world/rss.xml", "limit": 5}}
+  ]
+}

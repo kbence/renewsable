@@ -31,7 +31,7 @@
 
 ## 2. Core components
 
-- [ ] 2.1 Config loader and validator
+- [x] 2.1 Config loader and validator
   - Define a frozen `Config` dataclass with the fields and defaults specified in design.md (schedule_time, output_dir, remarkable_folder, stories, font_size, log_dir, user_agent, goosepaper_bin, rmapi_bin, feed_fetch_retries, feed_fetch_backoff_s, upload_retries, upload_backoff_s, subprocess_timeout_s)
   - Implement `Config.load(path)` reading JSON and `Config.validate()` raising `ConfigError` whose message names both the config file path and the offending field
   - Validate `schedule_time` against `^\d{2}:\d{2}$` and that it parses via `datetime.time.fromisoformat`; require non-empty `stories`; expand paths to absolute
@@ -187,3 +187,4 @@
 - **goosepaper dependency**: PyPI `goosepaper==0.7.1` does not exist (only 0.7.0, which has a broken sdist missing `requirements.txt`). Pin via git tag: `goosepaper @ git+https://github.com/j6k4m8/goosepaper@v0.7.1`. Confirmed installable on Python 3.11 macOS arm64 with `rmapy` as a transitive runtime import (goosepaper's `__main__` imports upload.py which imports rmapy). `rmapy` must be installed even though we never use goosepaper's upload path.
 - **Rotation primitive**: `TimedRotatingFileHandler(when='midnight', interval=1, backupCount=14)` satisfies "14 days of runs" (Req 8.2) better than size-based `RotatingFileHandler` suggested in task 1.4 text. Deviation documented in `src/renewsable/logging_setup.py` docstring.
 - **Filter placement**: Redaction filter must be attached to each handler, not the logger, so filters run after record formatting across thread boundaries.
+- **Config.load(path) requires a non-None path**: design diagram annotates `Path | None` but the implementation expects the CLI (task 3.1) to resolve `paths.default_config_path()` before calling `Config.load`. Task 3.1 must do this, e.g. `Config.load(args.config or paths.default_config_path())`.

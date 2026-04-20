@@ -1,0 +1,7 @@
+{
+  "schedule_time": "25:99",
+  "remarkable_folder": "/News",
+  "stories": [
+    {"provider": "rss", "config": {"rss_path": "https://telex.hu/rss", "limit": 5}}
+  ]
+}
