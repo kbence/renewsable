@@ -60,7 +60,7 @@
   - _Boundary: Pairing_
   - _Depends: 1.2, 1.3, 2.1_
 
-- [ ] 2.4 (P) Builder: feed pre-fetch, temp config, goosepaper subprocess
+- [x] 2.4 (P) Builder: feed pre-fetch, temp config, goosepaper subprocess
   - Implement per-host `robots.txt` check (cached for the run) using `urllib.robotparser`; skip disallowed hosts
   - Implement `_fetch_with_retry(url)` using `config.user_agent`, with bounded retries (`config.feed_fetch_retries`) and exponential backoff starting at `config.feed_fetch_backoff_s`; returns bytes or raises after exhaustion
   - For each `rss` story in the config, pre-fetch the feed to a temp file inside a per-run `TemporaryDirectory`, rewrite the `rss_path` in a copied goosepaper-subset config to the local `file://` URL
