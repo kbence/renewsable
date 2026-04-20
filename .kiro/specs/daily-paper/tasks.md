@@ -85,7 +85,7 @@
 
 ## 3. Integration: CLI, example config
 
-- [ ] 3.1 Implement the Click CLI group with all subcommands
+- [x] 3.1 Implement the Click CLI group with all subcommands
   - Create a Click group `renewsable` with global `--config PATH` and `--log-level LEVEL` options
   - Implement subcommands: `build`, `upload [PATH]`, `run`, `install-schedule`, `uninstall-schedule`, `pair [--force]`, `test-pipeline`
   - Each command: load config (exit 2 on `ConfigError`), call `configure_logging(config)`, instantiate the relevant component, call the method, translate `RenewsableError` subclasses to exit code 1 with stderr message, exit 0 on success
