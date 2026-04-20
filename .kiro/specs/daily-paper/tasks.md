@@ -111,7 +111,7 @@
   - Observable: on a fresh Pi the script exits 0, the venv contains `renewsable` and `rmapi` executables, and `renewsable --help` runs cleanly
   - _Requirements: 6.1, 7.1, 7.2, 7.3_
 
-- [ ] 4.2 Write the README with setup and deployment workflow
+- [x] 4.2 Write the README with setup and deployment workflow
   - Document the ordered Pi setup: run `install-pi.sh`, pair, test-pipeline, install-schedule, enable-linger
   - Document the deployment workflow from macOS: push to git, SSH to Pi, `git pull`, `pip install -e .`, `renewsable install-schedule` if the schedule time changed
   - Include a configuration reference table listing every top-level field, its type, and its default
