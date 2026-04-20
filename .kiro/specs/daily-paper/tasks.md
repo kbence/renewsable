@@ -72,7 +72,7 @@
   - _Boundary: Builder_
   - _Depends: 2.1_
 
-- [ ] 2.5 (P) Uploader: rmapi mkdir + put --force with bounded retries
+- [x] 2.5 (P) Uploader: rmapi mkdir + put --force with bounded retries
   - Implement `Uploader.upload(pdf, folder=None)` defaulting `folder` to `config.remarkable_folder`
   - Run `rmapi mkdir <folder>`; treat exit-code-non-zero with "already exists" stderr pattern as success; any other failure raises `UploadError`
   - Run `rmapi put --force <pdf> <folder>/` with bounded retries (`config.upload_retries`) and exponential backoff starting at `config.upload_backoff_s`, retrying only on non-token failure classes
