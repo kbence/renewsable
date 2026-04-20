@@ -163,6 +163,29 @@ renewsable run                 # quiet, same as the scheduled invocation
 renewsable test-pipeline       # verbose (at least INFO), prints progress
 ```
 
+## Docker (optional, developer only)
+
+For exercising the full build pipeline in a Linux sandbox — useful on macOS
+when you don't want to install Pango/Cairo/HarfBuzz system-wide. The image
+deliberately omits `rmapi` and `systemd`; it is not a production runtime.
+The Pi deployment story (bootstrap + systemd user timer) remains the
+supported path.
+
+```bash
+docker build -t renewsable:dev .
+
+docker run --rm \
+  -v "$PWD/config:/config:ro" \
+  -v "$HOME/.local/state/renewsable:/state" \
+  renewsable:dev \
+  --config /config/config.example.json build
+```
+
+The produced PDF lands at `$HOME/.local/state/renewsable/renewsable/out/renewsable-YYYY-MM-DD.pdf`
+on the host via the bind-mount (the inner `renewsable/` suffix is XDG's
+per-app namespace under `$XDG_STATE_HOME`). Logs land in
+`$HOME/.local/state/renewsable/renewsable/logs/renewsable.log`.
+
 ## Troubleshooting
 
 - **Token loss / "paired device was removed from my reMarkable cloud"** — the `rmapi.conf` at `~/.config/rmapi/rmapi.conf` is stale or missing. Re-pair:
