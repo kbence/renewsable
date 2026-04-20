@@ -20,6 +20,13 @@ dependencies = [
     # goosepaper via `goosepaper --help` fails without it. Declared here
     # so the transitive import resolves on the Pi.
     "rmapy",
+    # readability-lxml 0.8.4.1 regressed its encoding-detection path: its
+    # RE_CHARSET/RE_PRAGMA/RE_XML regexes are compiled as str, but some
+    # article responses reach them as bytes and raise
+    # `TypeError: cannot use a string pattern on a bytes-like object`.
+    # 0.8.1 is the last version without this mismatch. Pin until the
+    # upstream fix lands.
+    "readability-lxml==0.8.1",
 ]
 
 [project.optional-dependencies]
