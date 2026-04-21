@@ -13,8 +13,11 @@ authors = [{ name = "bnc" }]
 dependencies = [
     "click>=8.1",
     # PyPI goosepaper==0.7.1 does not exist; 0.7.0 has a broken sdist.
-    # Pin via git tag per spec task 1.1 implementation notes.
-    "goosepaper @ git+https://github.com/j6k4m8/goosepaper@v0.7.1",
+    # Pin via git to the kbence fork, which carries a one-line fix for
+    # the per-provider `limit` being silently capped at the method-level
+    # default (upstream issue: config `limit: 15` still produced 5 items).
+    # Pinned to an exact commit SHA so the build is reproducible.
+    "goosepaper @ git+https://github.com/kbence/goosepaper@02887c2",
     # goosepaper's __main__ eagerly imports rmapy (legacy upload client) but
     # does not declare it. We never use that code path, but importing
     # goosepaper via `goosepaper --help` fails without it. Declared here
