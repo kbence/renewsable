@@ -12,7 +12,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 3.1, 3.2, 9.1_
   - _Boundary: profiles_
 
-- [ ] 1.2 Implement `profiles.render_css` with golden-string tests
+- [x] 1.2 Implement `profiles.render_css` with golden-string tests
   - Add `render_css(profile: DeviceProfile) -> str` in `src/renewsable/profiles.py` emitting `@page { size: W H; margin: M; }` and `html, body { font-size: Fpt; }`
   - When `profile.color` is `False`, append `html, body { filter: grayscale(100%); }` and `img, svg { filter: grayscale(100%); }` rules
   - Extend `tests/test_profiles.py` with four golden-string cases: `render_css(rm2)`, `render_css(paper_pro_move)`, `render_css(rm2)` with `color=False` override, `render_css(paper_pro_move)` with `color=False` override; assert byte-identical output against pinned strings

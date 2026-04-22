@@ -20,6 +20,7 @@ __all__ = [
     "DeviceProfile",
     "BUILTIN_PROFILES",
     "resolve",
+    "render_css",
 ]
 
 
@@ -189,3 +190,30 @@ def resolve(name: str, overrides: dict[str, Any] | None = None) -> DeviceProfile
 
     _validate_overrides(overrides)
     return replace(base, **overrides)
+
+
+def render_css(profile: DeviceProfile) -> str:
+    """Return deterministic CSS for ``profile``.
+
+    Emits one rule per line with a single trailing newline and no trailing
+    whitespace. Floats format via ``{:g}`` (drops trailing zeros, e.g.
+    ``6.18in`` rather than ``6.180000in``); the integer ``font_size_pt``
+    formats directly. When ``profile.color`` is ``False``, two additional
+    grayscale filter rules are appended.
+
+    The output is pinned by golden-string tests in ``tests/test_profiles.py``;
+    any whitespace or numeric-format change is a breaking change.
+    """
+    lines = [
+        (
+            "@page { "
+            f"size: {profile.page_width_in:g}in {profile.page_height_in:g}in; "
+            f"margin: {profile.margin_in:g}in; "
+            "}"
+        ),
+        f"html, body {{ font-size: {profile.font_size_pt}pt; }}",
+    ]
+    if not profile.color:
+        lines.append("html, body { filter: grayscale(100%); }")
+        lines.append("img, svg { filter: grayscale(100%); }")
+    return "\n".join(lines) + "\n"

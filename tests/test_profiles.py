@@ -10,7 +10,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from renewsable.errors import ConfigError
-from renewsable.profiles import BUILTIN_PROFILES, DeviceProfile, resolve
+from renewsable.profiles import BUILTIN_PROFILES, DeviceProfile, render_css, resolve
 
 
 class TestBuiltinRegistry:
@@ -210,3 +210,57 @@ class TestProfileIsFrozen:
         p = resolve("paper_pro_move", {"remarkable_folder": "/x"})
         with pytest.raises((FrozenInstanceError, AttributeError)):
             p.color = False  # type: ignore[misc]
+
+
+# Golden-string pins for render_css. One rule per line, trailing newline, no
+# trailing whitespace. Floats formatted via `:g` (drops trailing zeros);
+# font_size_pt is an int so `{v}pt` is stable.
+_RM2_COLOR_CSS = (
+    "@page { size: 6.18in 8.23in; margin: 0.35in; }\n"
+    "html, body { font-size: 12pt; }\n"
+)
+
+_PAPER_PRO_MOVE_COLOR_CSS = (
+    "@page { size: 4.38in 5.84in; margin: 0.25in; }\n"
+    "html, body { font-size: 11pt; }\n"
+)
+
+_RM2_MONO_CSS = (
+    "@page { size: 6.18in 8.23in; margin: 0.35in; }\n"
+    "html, body { font-size: 12pt; }\n"
+    "html, body { filter: grayscale(100%); }\n"
+    "img, svg { filter: grayscale(100%); }\n"
+)
+
+_PAPER_PRO_MOVE_MONO_CSS = (
+    "@page { size: 4.38in 5.84in; margin: 0.25in; }\n"
+    "html, body { font-size: 11pt; }\n"
+    "html, body { filter: grayscale(100%); }\n"
+    "img, svg { filter: grayscale(100%); }\n"
+)
+
+
+class TestRenderCss:
+    """Byte-identical golden-string pins for the four profile variants.
+
+    Whitespace decision: each rule on its own line, no trailing whitespace,
+    single trailing newline. Floats formatted via ``{:g}`` (drops trailing
+    zeros, e.g. ``6.18in`` not ``6.18000in``). Integer font_size_pt.
+    """
+
+    def test_render_css_rm2_color(self) -> None:
+        assert render_css(BUILTIN_PROFILES["rm2"]) == _RM2_COLOR_CSS
+
+    def test_render_css_paper_pro_move_color(self) -> None:
+        assert (
+            render_css(BUILTIN_PROFILES["paper_pro_move"])
+            == _PAPER_PRO_MOVE_COLOR_CSS
+        )
+
+    def test_render_css_rm2_mono_override(self) -> None:
+        profile = resolve("rm2", {"color": False})
+        assert render_css(profile) == _RM2_MONO_CSS
+
+    def test_render_css_paper_pro_move_mono_override(self) -> None:
+        profile = resolve("paper_pro_move", {"color": False})
+        assert render_css(profile) == _PAPER_PRO_MOVE_MONO_CSS
