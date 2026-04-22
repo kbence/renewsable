@@ -401,28 +401,55 @@ def _normalise_device_profiles(
     apply the default (and emit the DEBUG log). Otherwise returns the fully
     resolved list of :class:`DeviceProfile` instances. Raises
     :class:`ConfigError` on type or validation failure; ``_resolve_profile``
-    (``profiles.resolve``) raises on unknown names / bad overrides.
+    (``profiles.resolve``) raises on unknown names / bad overrides, and this
+    function wraps those with the config file path plus the offending key
+    (Req 9.1 / 9.3 — operator must see both the file and the field).
     """
     if "device_profile" in data:
-        return [_resolve_single(cfg_path, "device_profile", data["device_profile"])]
+        entry = data["device_profile"]
+        # Reject anything that is neither a string shorthand nor an object
+        # form *before* dispatching to _resolve_single, so the error message
+        # names the top-level input key rather than a synthetic index.
+        if not isinstance(entry, (str, dict)):
+            raise ConfigError(
+                f"config field 'device_profile' in {cfg_path}: expected "
+                f"string or object, got {type(entry).__name__} ({entry!r})",
+            )
+        resolved = [_resolve_single(cfg_path, "device_profile", entry)]
+        _check_no_duplicate_profiles(cfg_path, resolved)
+        return resolved
     if "device_profiles" in data:
         raw = data["device_profiles"]
         if not isinstance(raw, list):
             raise ConfigError(
                 f"config field 'device_profiles' in {cfg_path}: expected list, "
-                f"got {type(raw).__name__}",
+                f"got {type(raw).__name__} ({raw!r})",
             )
-        return [
+        resolved = [
             _resolve_single(cfg_path, f"device_profiles[{i}]", entry)
             for i, entry in enumerate(raw)
         ]
+        _check_no_duplicate_profiles(cfg_path, resolved)
+        return resolved
     return None
 
 
 def _resolve_single(cfg_path: Path, where: str, entry: Any) -> DeviceProfile:
-    """Resolve a single profile entry (string shorthand or object form)."""
+    """Resolve a single profile entry (string shorthand or object form).
+
+    ``profiles.resolve`` raises :class:`ConfigError` with its own message on
+    unknown names / bad overrides. We catch and re-raise with the config file
+    path and the offending key prepended, because the operator needs both
+    pieces of context to locate and fix the mistake (Req 9.1 / 9.3).
+    """
     if isinstance(entry, str):
-        return _resolve_profile(entry)
+        try:
+            return _resolve_profile(entry)
+        except ConfigError as exc:
+            raise ConfigError(
+                f"config field {where!r} in {cfg_path}: {exc.message}",
+                remediation=exc.remediation,
+            ) from exc
     if isinstance(entry, dict):
         if "name" not in entry:
             raise ConfigError(
@@ -430,9 +457,43 @@ def _resolve_single(cfg_path: Path, where: str, entry: Any) -> DeviceProfile:
                 f"include a 'name' key; got keys {sorted(entry)!r}",
             )
         name = entry["name"]
+        if not isinstance(name, str):
+            raise ConfigError(
+                f"config field {where!r} in {cfg_path}: profile 'name' must "
+                f"be a string; got {type(name).__name__} ({name!r})",
+            )
         overrides = {k: v for k, v in entry.items() if k != "name"}
-        return _resolve_profile(name, overrides or None)
+        try:
+            return _resolve_profile(name, overrides or None)
+        except ConfigError as exc:
+            raise ConfigError(
+                f"config field {where!r} in {cfg_path}: {exc.message}",
+                remediation=exc.remediation,
+            ) from exc
     raise ConfigError(
         f"config field {where!r} in {cfg_path}: expected string or object, "
-        f"got {type(entry).__name__}",
+        f"got {type(entry).__name__} ({entry!r})",
     )
+
+
+def _check_no_duplicate_profiles(
+    cfg_path: Path, resolved: list[DeviceProfile]
+) -> None:
+    """Reject ``device_profiles`` lists that contain the same name twice.
+
+    Duplicates would cause the CLI loop to build and upload the same PDF
+    twice (different tmpdir, same content, same filename, same cloud
+    folder), which is never what the operator intended. Req 9.2.
+    """
+    seen: set[str] = set()
+    for p in resolved:
+        if p.name in seen:
+            raise ConfigError(
+                f"config field 'device_profiles' in {cfg_path}: duplicate "
+                f"profile name {p.name!r}; each profile may appear at most once",
+                remediation=(
+                    "remove the duplicate entry, or override a different "
+                    "built-in profile"
+                ),
+            )
+        seen.add(p.name)

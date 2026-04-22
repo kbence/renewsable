@@ -34,7 +34,7 @@
   - _Boundary: Config_
   - _Depends: 1.1_
 
-- [ ] 2.2 Config validation for profile-related errors
+- [x] 2.2 Config validation for profile-related errors
   - Extend `Config.validate` (or the loader's validation layer) to reject: unknown profile name, duplicate profile names within `device_profiles`, non-string profile name, non-bool color override, non-string `remarkable_folder` override, `remarkable_folder` override that does not start with `/`, `device_profiles` that is not a list, `device_profile` that is neither string nor object
   - Every raised `ConfigError` names the config file path and the offending key/value, and lists the supported profile names when relevant
   - All profile-related validation runs inside `Config.load` / `Config.validate`, before any caller gets a populated `Config` object (so feed fetch and upload never start when config is bad)

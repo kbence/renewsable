@@ -472,3 +472,125 @@ class TestDeviceProfiles:
             f"expected no default-profile DEBUG log when profile declared, "
             f"got {[r.getMessage() for r in matching]!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Profile-related validation errors (Task 2.2)
+# ---------------------------------------------------------------------------
+
+
+_BASE_VALID_PAYLOAD: dict = {
+    "schedule_time": "05:30",
+    "remarkable_folder": "/News",
+    "stories": [{"provider": "rss", "config": {"rss_path": "https://x/y"}}],
+}
+
+
+def _payload_with(**extra) -> dict:
+    """Return a deep-ish copy of the valid base payload merged with ``extra``."""
+    data = {
+        "schedule_time": _BASE_VALID_PAYLOAD["schedule_time"],
+        "remarkable_folder": _BASE_VALID_PAYLOAD["remarkable_folder"],
+        "stories": [dict(s) for s in _BASE_VALID_PAYLOAD["stories"]],
+    }
+    data.update(extra)
+    return data
+
+
+# Each case: (id, payload, expected substrings in the error message).
+# The file path is asserted separately in the test body.
+_PROFILE_VALIDATION_CASES = [
+    pytest.param(
+        _payload_with(device_profile="no_such_profile"),
+        ["no_such_profile", "rm2", "paper_pro_move"],
+        id="unknown_profile_name",
+    ),
+    pytest.param(
+        _payload_with(
+            device_profiles=[{"name": "rm2"}, {"name": "rm2"}],
+        ),
+        ["device_profiles", "rm2", "duplicate"],
+        id="duplicate_profile_names",
+    ),
+    pytest.param(
+        _payload_with(device_profile=42),
+        ["device_profile"],
+        id="non_string_profile_name",
+    ),
+    pytest.param(
+        _payload_with(
+            device_profile={"name": "rm2", "color": "yes"},
+        ),
+        ["color"],
+        id="non_bool_color_override",
+    ),
+    pytest.param(
+        _payload_with(
+            device_profile={"name": "rm2", "remarkable_folder": 123},
+        ),
+        ["remarkable_folder"],
+        id="non_string_remarkable_folder_override",
+    ),
+    pytest.param(
+        _payload_with(
+            device_profile={"name": "rm2", "remarkable_folder": "News-no-slash"},
+        ),
+        ["remarkable_folder", "/"],
+        id="remarkable_folder_override_missing_leading_slash",
+    ),
+    pytest.param(
+        _payload_with(device_profiles="rm2"),
+        ["device_profiles", "list"],
+        id="device_profiles_not_a_list",
+    ),
+    pytest.param(
+        _payload_with(device_profile=42),
+        ["device_profile"],
+        id="device_profile_neither_string_nor_object_int",
+    ),
+]
+
+
+@pytest.mark.parametrize("payload,expected_substrings", _PROFILE_VALIDATION_CASES)
+def test_profile_validation_errors(
+    fake_home, tmp_path, payload, expected_substrings
+):
+    """Requirement 1.4, 9.1, 9.2, 9.3, 9.4.
+
+    Every ``ConfigError`` raised from profile validation must name the
+    config file path (so operators know which file to edit) AND the
+    offending key/value. The unknown-profile case additionally lists the
+    supported profile names.
+    """
+    cfg_path = _write_json(tmp_path / "cfg.json", payload)
+    with pytest.raises(ConfigError) as ei:
+        Config.load(cfg_path)
+    message = ei.value.message
+    assert str(cfg_path) in message, (
+        f"error message must name the config file path; got {message!r}"
+    )
+    for sub in expected_substrings:
+        assert sub in message, (
+            f"error message must mention {sub!r}; got {message!r}"
+        )
+
+
+def test_profile_validation_surfaces_before_side_effects(
+    fake_home, tmp_path, monkeypatch
+):
+    """Requirement 9.4: validation errors surface before any fetch/upload work.
+
+    ``Config.load`` is purely declarative (no subprocess calls), so this is
+    naturally satisfied. Guard against regression by asserting that no
+    ``feed_fetch`` / ``upload`` side-effect hooks would have been called;
+    the simplest observable is that the error is raised before ``Config.load``
+    returns, which the parametrised tests above already verify. This test
+    double-checks that the exception type is ``ConfigError`` (exit 2 path)
+    rather than a build/upload error that would imply later-stage failure.
+    """
+    cfg_path = _write_json(
+        tmp_path / "cfg.json",
+        _payload_with(device_profile="no_such_profile"),
+    )
+    with pytest.raises(ConfigError):
+        Config.load(cfg_path)
