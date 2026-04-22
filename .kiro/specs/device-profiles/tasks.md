@@ -60,7 +60,7 @@
 
 ## 4. CLI extension
 
-- [ ] 4.1 CLI iterates over `config.device_profiles`
+- [x] 4.1 CLI iterates over `config.device_profiles`
   - In `cli.build`, `cli.run`, and `cli.test-pipeline`: replace the single `Builder(config).build()` call with `for profile in config.device_profiles: Builder(config).build(profile)` and iterate through the existing per-command side effects (print the path in `build`, plus `Uploader(config).upload(pdf, folder=profile.remarkable_folder or config.remarkable_folder)` in `run` / `test-pipeline`)
   - Wrap each iteration in a try/except that catches `RenewsableError`, logs `logger.error("profile %s failed: %s", profile.name, exc)`, writes the error to stderr, sets a failure flag, and continues to the next profile
   - After the loop, exit 1 if any profile failed, 0 otherwise (unchanged: `ConfigError` still exits 2 via the bootstrap path)

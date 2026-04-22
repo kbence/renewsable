@@ -61,6 +61,7 @@ default-upload-path branch.
 from __future__ import annotations
 
 import datetime  # noqa: F401  (kept as module-level alias for tests)
+import logging
 import sys
 from pathlib import Path
 from typing import Callable
@@ -71,11 +72,14 @@ from . import __version__
 from . import paths as paths_mod
 from .builder import Builder
 from .config import Config
-from .errors import BuildError, ConfigError, RenewsableError
+from .errors import ConfigError, RenewsableError
 from .logging_setup import configure_logging
 from .pairing import Pairing
 from .scheduler import Scheduler
 from .uploader import Uploader
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ["main"]
@@ -217,18 +221,25 @@ def _exe_path() -> Path:
 def build(ctx: click.Context) -> None:
     """Build today's PDF from the configured feeds.
 
-    Prints the absolute path to the produced file on stdout so scripts can
-    pipe it into another command. Exits 1 with a message on stderr if the
-    build fails (e.g. every configured feed was unreachable, or goosepaper
-    exited non-zero).
+    Iterates over ``config.device_profiles`` and prints the absolute path
+    to each produced file on stdout so scripts can pipe it into another
+    command. If any profile fails, its error is logged and written to
+    stderr and the command exits 1 after attempting every profile;
+    otherwise exits 0.
     """
     config = _bootstrap(ctx)
 
-    def _do() -> None:
-        pdf_path = Builder(config).build()
-        click.echo(str(pdf_path))
-
-    _run_with_error_translation(ctx, _do)
+    any_failed = False
+    for profile in config.device_profiles:
+        try:
+            pdf_path = Builder(config).build(profile)
+            click.echo(str(pdf_path))
+        except RenewsableError as exc:
+            any_failed = True
+            logger.error("profile %s failed: %s", profile.name, exc)
+            click.echo(str(exc), err=True)
+    if any_failed:
+        ctx.exit(1)
 
 
 @main.command()
@@ -259,26 +270,30 @@ def upload(ctx: click.Context, path: Path | None) -> None:
 @main.command()
 @click.pass_context
 def run(ctx: click.Context) -> None:
-    """Build today's PDF and then upload it.
+    """Build today's PDF and then upload it, per configured profile.
 
-    This is the command the scheduled systemd timer invokes. It sequences
-    ``Builder.build()`` followed by ``Uploader.upload()``, short-circuiting
-    with exit 1 on :class:`BuildError` so no empty or stale PDF is ever
-    shipped (Req 4.5).
+    This is the command the scheduled systemd timer invokes. For each
+    profile in ``config.device_profiles`` it sequences
+    ``Builder.build(profile)`` followed by ``Uploader.upload(pdf,
+    folder=...)``. A profile's upload step is skipped when its own build
+    raised, but the next profile is still attempted (Req 6.3). The
+    command exits 1 if any profile failed, 0 otherwise.
     """
     config = _bootstrap(ctx)
 
-    def _do() -> None:
-        # Short-circuit on BuildError: the upload step must not run if the
-        # build failed. ``_run_with_error_translation`` will turn the
-        # re-raised BuildError into exit code 1 with the message on stderr.
+    any_failed = False
+    for profile in config.device_profiles:
         try:
-            pdf = Builder(config).build()
-        except BuildError:
-            raise
-        Uploader(config).upload(pdf)
-
-    _run_with_error_translation(ctx, _do)
+            pdf = Builder(config).build(profile)
+            click.echo(str(pdf))
+            folder = profile.remarkable_folder or config.remarkable_folder
+            Uploader(config).upload(pdf, folder=folder)
+        except RenewsableError as exc:
+            any_failed = True
+            logger.error("profile %s failed: %s", profile.name, exc)
+            click.echo(str(exc), err=True)
+    if any_failed:
+        ctx.exit(1)
 
 
 @main.command("install-schedule")
@@ -365,13 +380,17 @@ def test_pipeline(ctx: click.Context) -> None:
         ctx.obj["log_level"] = "INFO"
     config = _bootstrap(ctx)
 
-    def _do() -> None:
+    any_failed = False
+    for profile in config.device_profiles:
         try:
-            pdf = Builder(config).build()
-        except BuildError:
-            raise
-        click.echo(f"built {pdf}")
-        Uploader(config).upload(pdf)
-        click.echo("uploaded successfully")
-
-    _run_with_error_translation(ctx, _do)
+            pdf = Builder(config).build(profile)
+            click.echo(f"built {pdf}")
+            folder = profile.remarkable_folder or config.remarkable_folder
+            Uploader(config).upload(pdf, folder=folder)
+            click.echo("uploaded successfully")
+        except RenewsableError as exc:
+            any_failed = True
+            logger.error("profile %s failed: %s", profile.name, exc)
+            click.echo(str(exc), err=True)
+    if any_failed:
+        ctx.exit(1)

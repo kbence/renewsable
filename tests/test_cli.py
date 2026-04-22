@@ -47,6 +47,7 @@ from renewsable.errors import (
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 VALID_CONFIG = FIXTURE_DIR / "config.valid.json"
+PROFILES_LIST_CONFIG = FIXTURE_DIR / "config.profiles_list.json"
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +95,18 @@ def _install_fakes(
         def __init__(self, config: Any) -> None:
             rec.record("Builder.__init__", config)
 
-        def build(self, today: Any = None) -> Path:
-            rec.record("Builder.build", today=today)
+        def build(self, profile: Any = None, today: Any = None) -> Path:
+            rec.record("Builder.build", profile, today=today)
             if build_raises is not None:
-                raise build_raises
+                # Support per-call raising via a list of (exc_or_None).
+                if isinstance(build_raises, list):
+                    exc = build_raises.pop(0)
+                    if exc is not None:
+                        raise exc
+                else:
+                    raise build_raises
+            if isinstance(build_result, list):
+                return build_result.pop(0)
             assert build_result is not None, "test must provide build_result"
             return build_result
 
@@ -511,6 +520,145 @@ def test_test_pipeline_runs_build_then_upload(
     assert "Builder.build" in names
     assert "Uploader.upload" in names
     assert names.index("Builder.build") < names.index("Uploader.upload")
+
+
+# ---------------------------------------------------------------------------
+# Multi-profile iteration (Task 4.1; Req 6.1, 6.3, 7.1, 7.2)
+# ---------------------------------------------------------------------------
+
+
+def test_build_iterates_profiles(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+    tmp_path: Path,
+) -> None:
+    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
+    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
+    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
+
+    result = runner.invoke(
+        main, ["--config", str(PROFILES_LIST_CONFIG), "build"]
+    )
+    assert result.exit_code == 0, (result.output, result.stderr)
+
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    assert len(build_calls) == 2
+    # First positional arg is the profile; names come from the fixture.
+    assert build_calls[0][1][0].name == "rm2"
+    assert build_calls[1][1][0].name == "paper_pro_move"
+    # Both PDF paths are printed on stdout.
+    assert str(pdf_rm2) in result.output
+    assert str(pdf_ppm) in result.output
+    # build does not invoke Uploader.
+    assert "Uploader.upload" not in recorder.names()
+
+
+def test_run_iterates_profiles_with_distinct_folders(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+    tmp_path: Path,
+) -> None:
+    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
+    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
+    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
+
+    result = runner.invoke(
+        main, ["--config", str(PROFILES_LIST_CONFIG), "run"]
+    )
+    assert result.exit_code == 0, (result.output, result.stderr)
+
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    assert len(build_calls) == 2
+    assert len(upload_calls) == 2
+
+    # First profile (rm2) inherits config.remarkable_folder ("/News").
+    assert Path(str(upload_calls[0][1][0])) == pdf_rm2
+    assert upload_calls[0][2]["folder"] == "/News"
+    # Second profile (paper_pro_move) overrides to "/News-Move".
+    assert Path(str(upload_calls[1][1][0])) == pdf_ppm
+    assert upload_calls[1][2]["folder"] == "/News-Move"
+
+
+def test_run_partial_failure_continues_and_exits_1(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+    tmp_path: Path,
+) -> None:
+    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
+    _install_fakes(
+        monkeypatch,
+        recorder,
+        build_result=[pdf_ppm],
+        build_raises=[BuildError("rm2 feed failed"), None],
+    )
+
+    result = runner.invoke(
+        main, ["--config", str(PROFILES_LIST_CONFIG), "run"]
+    )
+    assert result.exit_code == 1, (result.output, result.stderr)
+
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    # Both profiles were attempted; second profile's upload still ran.
+    assert len(build_calls) == 2
+    assert len(upload_calls) == 1
+    assert Path(str(upload_calls[0][1][0])) == pdf_ppm
+    assert upload_calls[0][2]["folder"] == "/News-Move"
+
+    # The first-profile failure is on stderr.
+    assert "rm2 feed failed" in result.stderr
+
+
+def test_test_pipeline_iterates_profiles(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+    tmp_path: Path,
+) -> None:
+    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
+    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
+    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
+
+    result = runner.invoke(
+        main, ["--config", str(PROFILES_LIST_CONFIG), "test-pipeline"]
+    )
+    assert result.exit_code == 0, (result.output, result.stderr)
+
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    assert len(build_calls) == 2
+    assert len(upload_calls) == 2
+    assert upload_calls[0][2]["folder"] == "/News"
+    assert upload_calls[1][2]["folder"] == "/News-Move"
+
+
+def test_upload_with_explicit_path_unchanged_multi_profile(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+    tmp_path: Path,
+) -> None:
+    """Explicit-path upload never fans out over profiles."""
+    explicit = tmp_path / "x.pdf"
+    _install_fakes(monkeypatch, recorder)
+    result = runner.invoke(
+        main,
+        ["--config", str(PROFILES_LIST_CONFIG), "upload", str(explicit)],
+    )
+    assert result.exit_code == 0, (result.output, result.stderr)
+    assert "Builder.build" not in recorder.names()
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    assert len(upload_calls) == 1
+    assert Path(str(upload_calls[0][1][0])) == explicit
 
 
 # ---------------------------------------------------------------------------
