@@ -2,7 +2,7 @@
 
 ## 1. Foundation: profiles module
 
-- [ ] 1.1 Implement `DeviceProfile`, built-in registry, and `profiles.resolve`
+- [x] 1.1 Implement `DeviceProfile`, built-in registry, and `profiles.resolve`
   - Add `src/renewsable/profiles.py` with a frozen `DeviceProfile` dataclass (`name`, `page_width_in`, `page_height_in`, `margin_in`, `font_size_pt`, `color`, `remarkable_folder`)
   - Define `BUILTIN_PROFILES` with `rm2` (6.18"×8.23", 0.35" margin, 12pt, `color=True`) and `paper_pro_move` (4.38"×5.84", 0.25" margin, 11pt, `color=True`)
   - Implement `resolve(name: str, overrides: dict | None = None) -> DeviceProfile` that looks up the built-in, shallow-merges validated overrides, and raises `ConfigError` (from `renewsable.errors`) naming the invalid value and listing supported names on unknown input
