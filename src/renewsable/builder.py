@@ -176,10 +176,14 @@ class Builder:
             )
 
             goosepaper_config_path = tmp_dir / "goosepaper-config.json"
-            self._write_goosepaper_config(goosepaper_config_path, prepared_stories)
+            self._write_goosepaper_config(
+                goosepaper_config_path,
+                prepared_stories,
+                style_name=profile.name,
+            )
 
             self._run_goosepaper(
-                goosepaper_config_path, output_path, profile=profile, cwd=tmp_dir
+                goosepaper_config_path, output_path, cwd=tmp_dir
             )
 
         self._validate_pdf(output_path)
@@ -258,15 +262,24 @@ class Builder:
     # ------------------------------------------------------------------
 
     def _write_goosepaper_config(
-        self, path: Path, prepared_stories: list[dict[str, Any]]
+        self,
+        path: Path,
+        prepared_stories: list[dict[str, Any]],
+        *,
+        style_name: str,
     ) -> None:
         """Serialise the goosepaper-subset config to ``path``.
 
         Only the handful of keys goosepaper documents appear in the output.
         Everything else renewsable tracks (schedule_time, remarkable_folder,
         log_dir, …) is none of goosepaper's business.
+
+        The ``style_name`` is written into the goosepaper config's ``style``
+        field rather than passed as a CLI flag — goosepaper's ``--style`` is
+        a config-only entry (see multiparser.argumentOrConfig), not an
+        argparse flag.
         """
-        cfg: dict[str, Any] = {"stories": prepared_stories}
+        cfg: dict[str, Any] = {"stories": prepared_stories, "style": style_name}
         if self._config.font_size is not None:
             cfg["font_size"] = self._config.font_size
         path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -280,19 +293,21 @@ class Builder:
         config_path: Path,
         output_path: Path,
         *,
-        profile: DeviceProfile,
         cwd: Path,
     ) -> None:
-        """Run ``goosepaper -c config -o output --noupload --style <profile>``.
+        """Run ``goosepaper -c config -o output --noupload``.
 
         ``--noupload`` is goosepaper's switch that bypasses its (broken for
         us) built-in upload path; renewsable always uploads via its own
         Uploader component.
 
-        ``--style <profile.name>`` tells goosepaper to read
-        ``./styles/<profile.name>.css`` relative to its CWD; we pass
-        ``cwd=<tmpdir>`` so it finds the per-run rendered CSS file that
-        :meth:`build` has written there.
+        The profile-specific style is selected via the ``style`` key in the
+        goosepaper config JSON (written by :meth:`_write_goosepaper_config`)
+        rather than a CLI flag — goosepaper's ``--style`` is a config-only
+        entry (see multiparser.argumentOrConfig in the installed goosepaper).
+        goosepaper resolves it to ``./styles/<profile.name>.css`` relative
+        to its CWD, which is why we pass ``cwd=<tmpdir>`` where
+        :meth:`build` has written the per-run rendered CSS file.
 
         Captures stdout/stderr into memory and forwards them to the logger:
         stderr → WARNING when goosepaper exits non-zero, DEBUG otherwise.
@@ -308,8 +323,6 @@ class Builder:
             "-o",
             str(output_path),
             "--noupload",
-            "--style",
-            profile.name,
         ]
         logger.info("invoking goosepaper: %s", " ".join(argv))
 

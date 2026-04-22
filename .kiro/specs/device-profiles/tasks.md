@@ -99,3 +99,4 @@
   - Observable: `grep -E "device_profile|paper_pro_move|device_profiles" config/README.md` returns non-empty
   - _Requirements: 3.3, 4.2_
   - _Boundary: docs_
+- **goosepaper `--style` is config-only, not a CLI flag**: the discovery note that goosepaper accepts `--style <name>` was wrong. `multiparser.argumentOrConfig("style", ...)` reads the key from CLI OR the config JSON, but goosepaper's argparse doesn't actually add `--style`, so passing it as argv fails with "unrecognized arguments". Fix: write `"style": "<profile.name>"` into the goosepaper-subset config JSON. Live-verified: PDF page dimensions match the profile exactly (rm2 6.180 × 8.230 in, paper_pro_move 4.380 × 5.840 in).

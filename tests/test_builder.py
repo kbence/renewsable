@@ -881,6 +881,11 @@ def _install_capturing_subprocess(
                 }
             else:
                 call["styles_files"] = None
+        # Capture the goosepaper config JSON before tempdir cleanup.
+        if "-c" in argv:
+            cfg_path = Path(argv[argv.index("-c") + 1])
+            if cfg_path.is_file():
+                call["goosepaper_config"] = cfg_path.read_text(encoding="utf-8")
         # Write a stub PDF to the -o target so validation passes.
         if "-o" in argv:
             out_idx = argv.index("-o") + 1
@@ -894,8 +899,10 @@ def _install_capturing_subprocess(
     return captured
 
 
-def test_goosepaper_invoked_with_style_flag(tmp_path, monkeypatch):
-    """argv includes ``--style <profile.name>``."""
+def test_goosepaper_config_includes_style_field(tmp_path, monkeypatch):
+    """The goosepaper-subset JSON handed to ``goosepaper -c`` sets
+    ``"style": "<profile.name>"``. goosepaper's ``--style`` is a
+    config-only entry (multiparser.argumentOrConfig), not a CLI flag."""
     cfg = _make_config(tmp_path)
     _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
     _no_sleep(monkeypatch)
@@ -905,9 +912,11 @@ def test_goosepaper_invoked_with_style_flag(tmp_path, monkeypatch):
     Builder(cfg).build(BUILTIN_PROFILES["rm2"], today=datetime.date(2026, 4, 19))
 
     assert len(captured["calls"]) == 1
-    argv = captured["calls"][0]["argv"]
-    assert "--style" in argv
-    assert argv[argv.index("--style") + 1] == "rm2"
+    call = captured["calls"][0]
+    assert "--style" not in call["argv"]  # goosepaper has no --style CLI flag
+    import json as _json
+    goosepaper_cfg = _json.loads(call["goosepaper_config"])
+    assert goosepaper_cfg.get("style") == "rm2"
 
 
 def test_goosepaper_invoked_with_cwd_tmpdir(tmp_path, monkeypatch):
@@ -965,7 +974,7 @@ def test_output_filename_includes_profile_suffix(tmp_path, monkeypatch):
 
 def test_paper_pro_move_suffix(tmp_path, monkeypatch):
     """Paper Pro Move profile yields renewsable-<date>-paper_pro_move.pdf
-    with the correct CSS written and --style argv."""
+    with the profile-named style in the goosepaper config JSON."""
     cfg = _make_config(tmp_path)
     _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
     _no_sleep(monkeypatch)
@@ -976,8 +985,9 @@ def test_paper_pro_move_suffix(tmp_path, monkeypatch):
     out = Builder(cfg).build(profile, today=datetime.date(2026, 4, 19))
 
     assert out.name == "renewsable-2026-04-19-paper_pro_move.pdf"
-    argv = captured["calls"][0]["argv"]
-    assert argv[argv.index("--style") + 1] == "paper_pro_move"
+    import json as _json
+    goosepaper_cfg = _json.loads(captured["calls"][0]["goosepaper_config"])
+    assert goosepaper_cfg.get("style") == "paper_pro_move"
     styles_files = captured["calls"][0]["styles_files"]
     assert styles_files == {"paper_pro_move.css": render_css(profile)}
 
