@@ -1,0 +1,12 @@
+{
+  "schedule_time": "06:15",
+  "remarkable_folder": "/News",
+  "output_dir": "~/renewsable/out",
+  "device_profiles": [
+    {"name": "rm2"},
+    {"name": "paper_pro_move", "remarkable_folder": "/News-Move"}
+  ],
+  "stories": [
+    {"provider": "rss", "config": {"rss_path": "https://telex.hu/rss", "limit": 5}}
+  ]
+}

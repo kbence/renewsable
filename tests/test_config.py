@@ -25,6 +25,7 @@ Plus invariants from the design:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -32,12 +33,16 @@ import pytest
 
 from renewsable.config import Config
 from renewsable.errors import ConfigError
+from renewsable.profiles import BUILTIN_PROFILES
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 VALID_FIXTURE = FIXTURES_DIR / "config.valid.json"
 MISSING_FIELD_FIXTURE = FIXTURES_DIR / "config.missing_field.json"
 BAD_SCHEDULE_FIXTURE = FIXTURES_DIR / "config.bad_schedule.json"
+PROFILE_STRING_FIXTURE = FIXTURES_DIR / "config.profile_string.json"
+PROFILE_OBJECT_FIXTURE = FIXTURES_DIR / "config.profile_object.json"
+PROFILES_LIST_FIXTURE = FIXTURES_DIR / "config.profiles_list.json"
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +397,78 @@ class TestPathArgumentForms:
     def test_load_accepts_string_path(self, fake_home):
         cfg = Config.load(str(VALID_FIXTURE))
         assert cfg.schedule_time == "06:15"
+
+
+# ---------------------------------------------------------------------------
+# Device profiles (Task 2.1)
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceProfiles:
+    """Requirements 1.1, 1.3, 4.1, 4.2, 4.3 — four input shapes for profiles."""
+
+    def test_no_profile_key_defaults_to_rm2(self, fake_home):
+        cfg = Config.load(VALID_FIXTURE)
+        assert cfg.device_profiles == [BUILTIN_PROFILES["rm2"]]
+
+    def test_profile_string_shorthand(self, fake_home):
+        cfg = Config.load(PROFILE_STRING_FIXTURE)
+        assert cfg.device_profiles == [BUILTIN_PROFILES["paper_pro_move"]]
+
+    def test_profile_object_with_overrides(self, fake_home):
+        cfg = Config.load(PROFILE_OBJECT_FIXTURE)
+        assert len(cfg.device_profiles) == 1
+        p = cfg.device_profiles[0]
+        assert p.name == "paper_pro_move"
+        assert p.remarkable_folder == "/News-Move"
+        # other fields preserved from the built-in
+        assert p.page_width_in == BUILTIN_PROFILES["paper_pro_move"].page_width_in
+
+    def test_profiles_list(self, fake_home):
+        cfg = Config.load(PROFILES_LIST_FIXTURE)
+        assert len(cfg.device_profiles) == 2
+        assert cfg.device_profiles[0] == BUILTIN_PROFILES["rm2"]
+        assert cfg.device_profiles[1].name == "paper_pro_move"
+        assert cfg.device_profiles[1].remarkable_folder == "/News-Move"
+
+    def test_both_keys_rejected(self, fake_home, tmp_path):
+        cfg_path = _write_json(
+            tmp_path / "cfg.json",
+            {
+                "schedule_time": "05:30",
+                "remarkable_folder": "/News",
+                "stories": [{"provider": "rss", "config": {"rss_path": "https://x/y"}}],
+                "device_profile": "rm2",
+                "device_profiles": [{"name": "rm2"}],
+            },
+        )
+        with pytest.raises(ConfigError) as ei:
+            Config.load(cfg_path)
+        assert "device_profile" in ei.value.message
+        assert "device_profiles" in ei.value.message
+        assert str(cfg_path) in ei.value.message
+
+    def test_debug_log_emitted_when_defaulting(self, fake_home, caplog):
+        caplog.set_level(logging.DEBUG, logger="renewsable.config")
+        Config.load(VALID_FIXTURE)
+        matching = [
+            r for r in caplog.records
+            if r.levelno == logging.DEBUG
+            and "device profile" in r.getMessage()
+            and "rm2" in r.getMessage()
+        ]
+        assert matching, f"expected DEBUG default-profile log, got {caplog.records!r}"
+
+    def test_no_debug_log_when_profile_declared(self, fake_home, caplog):
+        caplog.set_level(logging.DEBUG, logger="renewsable.config")
+        Config.load(PROFILE_STRING_FIXTURE)
+        matching = [
+            r for r in caplog.records
+            if r.levelno == logging.DEBUG
+            and "device profile" in r.getMessage()
+            and "defaulting" in r.getMessage()
+        ]
+        assert not matching, (
+            f"expected no default-profile DEBUG log when profile declared, "
+            f"got {[r.getMessage() for r in matching]!r}"
+        )

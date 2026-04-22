@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -44,9 +45,19 @@ from typing import Any
 
 from . import paths
 from .errors import ConfigError
+from .profiles import BUILTIN_PROFILES, DeviceProfile, resolve as _resolve_profile
 
 
 __all__ = ["Config"]
+
+
+logger = logging.getLogger(__name__)
+
+
+# Input-only keys: accepted in the JSON payload but normalised into
+# ``device_profiles`` before the dataclass is constructed. They are not
+# dataclass fields and never appear on the resulting ``Config`` object.
+_PROFILE_INPUT_KEYS: frozenset[str] = frozenset({"device_profile", "device_profiles"})
 
 
 # ``HH:MM`` 24-hour clock. The pattern is intentionally strict (two digits
@@ -89,6 +100,9 @@ class Config:
     upload_retries: int = 3
     upload_backoff_s: float = 2.0
     subprocess_timeout_s: int = 180
+    device_profiles: list[DeviceProfile] = field(
+        default_factory=lambda: [BUILTIN_PROFILES["rm2"]]
+    )
 
     # ------------------------------------------------------------------
     # Public API
@@ -134,24 +148,48 @@ class Config:
             )
 
         # ---- Phase 3: closed-set key check ----
-        known_field_names = {f.name for f in fields(cls)}
+        # ``device_profile`` and ``device_profiles`` are input-only keys: the
+        # loader normalises them into the dataclass field ``device_profiles``
+        # (a list of :class:`DeviceProfile`). They are accepted in the JSON
+        # payload but never stored verbatim, and the two are mutually
+        # exclusive.
+        dataclass_field_names = {f.name for f in fields(cls)}
+        accepted_input_keys = (
+            dataclass_field_names - {"device_profiles"}
+        ) | _PROFILE_INPUT_KEYS
         for key in data:
-            if key not in known_field_names:
+            if key not in accepted_input_keys:
                 raise ConfigError(
                     f"unknown config field {key!r} in {cfg_path}",
                     remediation=(
                         f"remove this key or check for a typo; valid keys are: "
-                        f"{', '.join(sorted(known_field_names))}"
+                        f"{', '.join(sorted(accepted_input_keys))}"
                     ),
                 )
+
+        if "device_profile" in data and "device_profiles" in data:
+            raise ConfigError(
+                f"config at {cfg_path} declares both 'device_profile' and "
+                f"'device_profiles'; choose one",
+                remediation="remove one of the keys",
+            )
 
         # ---- Phase 4: per-field type-check + path expansion ----
         kwargs: dict[str, Any] = {}
         for f in fields(cls):
+            if f.name == "device_profiles":
+                continue  # handled separately below
             if f.name not in data:
                 continue
             value = data[f.name]
             kwargs[f.name] = _coerce_field(cfg_path, f.name, value)
+
+        # ---- Phase 4b: normalise profile input shapes ----
+        profile_list = _normalise_device_profiles(cfg_path, data)
+        if profile_list is not None:
+            kwargs["device_profiles"] = profile_list
+        # else: leave unset so the dataclass default_factory + _apply_defaults
+        # supply the built-in rm2 profile and emit the DEBUG log.
 
         # ---- Phase 5: defaults for omitted optional fields ----
         kwargs = _apply_defaults(kwargs)
@@ -345,4 +383,56 @@ def _apply_defaults(kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["output_dir"] = paths.default_output_dir()
     if "log_dir" not in kwargs:
         kwargs["log_dir"] = paths.default_log_dir()
+    if "device_profiles" not in kwargs:
+        # No profile fields declared — fall back to the default rm2 profile.
+        # DEBUG (not WARNING) because this is the expected single-profile
+        # path for the majority of operators (Req 4.1, Req 1.1).
+        logger.debug("no device profile declared, defaulting to %s", "rm2")
+        kwargs["device_profiles"] = [BUILTIN_PROFILES["rm2"]]
     return kwargs
+
+
+def _normalise_device_profiles(
+    cfg_path: Path, data: dict[str, Any]
+) -> list[DeviceProfile] | None:
+    """Normalise ``device_profile`` / ``device_profiles`` input into a list.
+
+    Returns ``None`` when neither key is present, signalling the caller to
+    apply the default (and emit the DEBUG log). Otherwise returns the fully
+    resolved list of :class:`DeviceProfile` instances. Raises
+    :class:`ConfigError` on type or validation failure; ``_resolve_profile``
+    (``profiles.resolve``) raises on unknown names / bad overrides.
+    """
+    if "device_profile" in data:
+        return [_resolve_single(cfg_path, "device_profile", data["device_profile"])]
+    if "device_profiles" in data:
+        raw = data["device_profiles"]
+        if not isinstance(raw, list):
+            raise ConfigError(
+                f"config field 'device_profiles' in {cfg_path}: expected list, "
+                f"got {type(raw).__name__}",
+            )
+        return [
+            _resolve_single(cfg_path, f"device_profiles[{i}]", entry)
+            for i, entry in enumerate(raw)
+        ]
+    return None
+
+
+def _resolve_single(cfg_path: Path, where: str, entry: Any) -> DeviceProfile:
+    """Resolve a single profile entry (string shorthand or object form)."""
+    if isinstance(entry, str):
+        return _resolve_profile(entry)
+    if isinstance(entry, dict):
+        if "name" not in entry:
+            raise ConfigError(
+                f"config field {where!r} in {cfg_path}: profile object must "
+                f"include a 'name' key; got keys {sorted(entry)!r}",
+            )
+        name = entry["name"]
+        overrides = {k: v for k, v in entry.items() if k != "name"}
+        return _resolve_profile(name, overrides or None)
+    raise ConfigError(
+        f"config field {where!r} in {cfg_path}: expected string or object, "
+        f"got {type(entry).__name__}",
+    )

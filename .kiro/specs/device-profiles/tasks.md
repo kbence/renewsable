@@ -23,7 +23,7 @@
 
 ## 2. Config loader extension
 
-- [ ] 2.1 Extend `Config` with `device_profiles` and loader normalisation
+- [x] 2.1 Extend `Config` with `device_profiles` and loader normalisation
   - Add `device_profiles: list[DeviceProfile]` to the frozen `Config` dataclass with `field(default_factory=lambda: [BUILTIN_PROFILES["rm2"]])`
   - Extend `Config.load` / `_apply_defaults` to accept four input shapes: absent → `[rm2]`, `"device_profile": "<name>"` → `[resolve(name)]`, `"device_profile": {"name": ..., "remarkable_folder": ...}` → `[resolve(name, overrides)]`, `"device_profiles": [...]` → `[resolve(name, overrides) for each entry]`
   - Reject configs that declare both `device_profile` and `device_profiles` with a `ConfigError` naming both keys
