@@ -73,7 +73,7 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 (P) Add a "Device profiles" section to the README
+- [x] 5.1 (P) Add a "Device profiles" section to the README
   - Add a new section under "Configuration reference" that documents the `device_profile` string/object shorthand and the `device_profiles` list, each with a JSON example
   - Include a "Built-in profiles" table listing name, page dimensions, default margin, default font size, and default colour for `rm2` and `paper_pro_move`
   - Add an "Upgrade note" sub-section explaining the one-time filename transition (`renewsable-YYYY-MM-DD.pdf` → `renewsable-YYYY-MM-DD-rm2.pdf`) and the one-time orphan PDF on the reMarkable cloud that the operator can delete
@@ -82,7 +82,7 @@
   - _Requirements: 3.3, 4.2_
   - _Boundary: docs_
 
-- [ ] 5.2 (P) Extend `PI_VERIFICATION.md` with a multi-profile smoke step
+- [x] 5.2 (P) Extend `PI_VERIFICATION.md` with a multi-profile smoke step
   - Update the existing filename references to the new `renewsable-<date>-<profile>.pdf` form
   - Add one new numbered step: operator copies `config/config.example.json` to a temp config with both `rm2` and `paper_pro_move` profiles (the latter with a distinct `remarkable_folder` such as `/News-Move`), runs `renewsable test-pipeline`, and verifies both dated+suffixed PDFs appear locally in `~/.local/state/renewsable/out/` and in their respective reMarkable cloud folders
   - Leave an Evidence placeholder under the new step for the operator to paste command output
@@ -92,7 +92,7 @@
 
 ## 6. Example config update
 
-- [ ] 6.1 (P) Annotate `config/README.md` with a multi-profile example
+- [x] 6.1 (P) Annotate `config/README.md` with a multi-profile example
   - Keep the shipped `config/config.example.json` as a single-profile-by-default file (no profile key declared) so operators who copy it see unchanged behaviour
   - In `config/README.md`, add a new section "Device profiles" showing three JSON snippets: the shorthand `"device_profile": "paper_pro_move"`, the object form with a `remarkable_folder` override, and the full `device_profiles` list form for shared deployments
   - Reference the README's built-in profile table instead of duplicating it

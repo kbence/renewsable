@@ -98,14 +98,14 @@ $ source .venv/bin/activate
 $ renewsable --config config/config.example.json build
 $ ls -la ~/.local/state/renewsable/out/
 $ TODAY=$(date +%Y-%m-%d)
-$ PDF=~/.local/state/renewsable/out/renewsable-${TODAY}.pdf
+$ PDF=~/.local/state/renewsable/out/renewsable-${TODAY}-rm2.pdf
 $ stat -c '%n %s bytes' "$PDF"
 $ xxd "$PDF" | head -1
 ```
 
 Success criteria:
 - `renewsable … build` exits 0 and prints the absolute path of the PDF it wrote.
-- The file at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.pdf` exists and has size > 0.
+- The file at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD-rm2.pdf` exists and has size > 0.
 - `xxd … | head -1` begins with `25504446 2d` (i.e. the literal bytes `%PDF-`).
 - Visual check: open the PDF on the Pi (`xdg-open "$PDF"`) or `scp` it back to the dev box. Hungarian articles from `telex.hu` render with accented characters intact (ő, ű, á, é, í, ó, ú) — no tofu boxes, no mojibake.
 
@@ -148,8 +148,8 @@ $ rmapi ls /News
 ```
 
 Success criteria:
-- `renewsable … upload` exits 0. Log contains `upload complete` (or equivalent) with the target path `/News/renewsable-YYYY-MM-DD`.
-- `rmapi ls /News` lists an entry `renewsable-YYYY-MM-DD` (name only; `rmapi` does not display the `.pdf` suffix for uploaded PDFs — they appear as documents).
+- `renewsable … upload` exits 0. Log contains `upload complete` (or equivalent) with the target path `/News/renewsable-YYYY-MM-DD-rm2`.
+- `rmapi ls /News` lists an entry `renewsable-YYYY-MM-DD-rm2` (name only; `rmapi` does not display the `.pdf` suffix for uploaded PDFs — they appear as documents).
 - On the tablet itself (after a cloud sync), the document is visible in the **News** folder.
 
 On failure:
@@ -183,7 +183,7 @@ $ echo "exit=$?"
 
 Success criteria:
 - Exits 0.
-- Both a new local PDF (same name, overwritten in place) and a new/updated `/News/renewsable-YYYY-MM-DD` on the cloud. Re-uploading is fine — the upload uses `rmapi put --force`.
+- Both a new local PDF (same name, overwritten in place) and a new/updated `/News/renewsable-YYYY-MM-DD-rm2` on the cloud. Re-uploading is fine — the upload uses `rmapi put --force`.
 - Log output is concise (INFO-level only, no `DEBUG`), consistent with what will be written when the timer fires it.
 
 Evidence:
@@ -214,8 +214,8 @@ $ rmapi ls /News
 
 Success criteria:
 - Exits 0. Output is verbose (at least INFO-level; build phase, upload phase, and per-feed progress visible).
-- Local PDF at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.pdf` is updated (mtime within the last minute).
-- `rmapi ls /News` still shows `renewsable-YYYY-MM-DD` (timestamp updated on the cloud side).
+- Local PDF at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD-rm2.pdf` is updated (mtime within the last minute).
+- `rmapi ls /News` still shows `renewsable-YYYY-MM-DD-rm2` (timestamp updated on the cloud side).
 
 Evidence:
 
@@ -381,6 +381,51 @@ Evidence:
 | 6.5 — `test-pipeline` end-to-end entry point works | 6 |
 | 8.1 — plain-text log file captures runs | 7b |
 | 8.2 — log file and journald agree on the same run | 7b |
+
+## 9. Multi-profile run — two PDFs from one invocation
+
+**Goal:** verify the `device-profiles` spec — a single scheduled run produces one PDF per configured profile and each lands in its own reMarkable folder.
+
+Setup a temp config that declares both built-in profiles with distinct destination folders. `paper_pro_move` gets its own folder so the two files don't collide on the tablet:
+
+```bash
+$ TODAY=$(date +%Y-%m-%d)
+$ cp config/config.example.json /tmp/renewsable-multiprofile.json
+$ python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path('/tmp/renewsable-multiprofile.json')
+cfg = json.loads(p.read_text())
+cfg['device_profiles'] = [
+    {'name': 'rm2'},
+    {'name': 'paper_pro_move', 'remarkable_folder': '/News-Move'},
+]
+p.write_text(json.dumps(cfg, indent=2))
+PY
+$ renewsable --config /tmp/renewsable-multiprofile.json test-pipeline
+$ ls -la ~/.local/state/renewsable/out/renewsable-${TODAY}-*.pdf
+$ rmapi ls /News
+$ rmapi ls /News-Move
+```
+
+Success criteria:
+- `renewsable … test-pipeline` exits 0 and logs a `build ok` / `upload ok` line for **both** `rm2` and `paper_pro_move`.
+- Two local PDFs exist: `renewsable-${TODAY}-rm2.pdf` and `renewsable-${TODAY}-paper_pro_move.pdf`.
+- `rmapi ls /News` lists a `renewsable-YYYY-MM-DD-rm2` entry.
+- `rmapi ls /News-Move` lists a `renewsable-YYYY-MM-DD-paper_pro_move` entry.
+- If one profile's build failed and the other succeeded, the command exits 1 and the failed profile's reason appears in stderr; the successful profile's PDF still lands. (Trigger by temporarily corrupting one feed URL.)
+
+Evidence:
+```
+# paste: output of `ls -la ~/.local/state/renewsable/out/renewsable-${TODAY}-*.pdf`
+# paste: output of `rmapi ls /News | grep ${TODAY}`
+# paste: output of `rmapi ls /News-Move | grep ${TODAY}`
+```
+
+On failure:
+- Check `journalctl --user -u renewsable.service --since "5 minutes ago"` and the plain-text log for the failing profile's reason.
+- If the `/News-Move` folder was not auto-created, verify the Uploader's `rmapi mkdir` step ran (`grep mkdir` in the log).
+
+---
 
 ## Sign-off
 

@@ -87,6 +87,37 @@ Add or remove entries by editing the `stories` array. The loader requires the
 array to be **non-empty**; an empty list raises `ConfigError` with a remediation
 hint.
 
+## Device profiles
+
+The shipped example is a **single-profile** config — it omits the profile key and gets the built-in `rm2` default so operators upgrading from the pre-profile version see no behavioural change. To tune the PDF for a different device, add one of these three shapes:
+
+**Shorthand (single profile, built-in defaults)**:
+```json
+{ "device_profile": "paper_pro_move" }
+```
+
+**Single profile with overrides (e.g. distinct destination folder)**:
+```json
+{
+  "device_profile": {
+    "name": "paper_pro_move",
+    "remarkable_folder": "/News-Move"
+  }
+}
+```
+
+**Multi-profile (one PDF per profile per run, typical for a shared deployment)**:
+```json
+{
+  "device_profiles": [
+    { "name": "rm2" },
+    { "name": "paper_pro_move", "remarkable_folder": "/News-Move" }
+  ]
+}
+```
+
+Supported built-in profiles, override keys, and the strict-mono `color: false` toggle are documented in the project README's "Device profiles" section. A config may declare either `device_profile` or `device_profiles`, not both.
+
 ## Validation sanity check
 
 Before deploying a modified copy, run:

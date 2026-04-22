@@ -138,6 +138,54 @@ The config is a single JSON object. Unknown top-level keys are rejected to catch
 
 The example at `config/config.example.json` is deliberately minimal: it sets only the required fields plus six pre-configured RSS feeds, and relies on defaults for everything else.
 
+### Device profiles
+
+A **device profile** tunes the generated PDF's page size and colour behaviour for a specific reMarkable model. The profile is declared via one of three shapes in your config; omitting the key entirely keeps the pre-existing default (the `rm2` profile).
+
+Shorthand (single profile, built-in defaults):
+```json
+{ "device_profile": "paper_pro_move" }
+```
+
+Single profile with overrides (e.g. a distinct destination folder):
+```json
+{
+  "device_profile": {
+    "name": "paper_pro_move",
+    "remarkable_folder": "/News-Move"
+  }
+}
+```
+
+Multi-profile (produces one PDF per profile per run):
+```json
+{
+  "device_profiles": [
+    { "name": "rm2" },
+    { "name": "paper_pro_move", "remarkable_folder": "/News-Move" }
+  ]
+}
+```
+
+A config may declare `device_profile` OR `device_profiles`, not both.
+
+**Built-in profiles**
+
+| Name | Page dimensions (portrait) | Default margin | Default font size | Default colour |
+|------|----------------------------|----------------|--------------------|----------------|
+| `rm2` | 6.18in × 8.23in (≈10.3" screen) | 0.35in | 12pt | on (rm2 grayscales on device anyway; stays a colour PDF for byte-compat with pre-profile builds) |
+| `paper_pro_move` | 4.38in × 5.84in (≈7.3" screen) | 0.25in | 11pt | on (Paper Pro Move has colour e-ink) |
+
+Override keys (any subset): `page_width_in`, `page_height_in`, `margin_in`, `font_size_pt`, `color`, `remarkable_folder`. The `name` key cannot be overridden.
+
+**Strict-mono PDFs**: operators who want the PDF bytes themselves to be grayscale can opt the relevant profile in with `"color": false` in an override. The rm2 device displays grayscale regardless, so this override is mostly useful if you view the PDF on a colour viewer.
+
+**Filename**: every build always writes `renewsable-YYYY-MM-DD-<profile>.pdf`, whether one or many profiles are configured. The per-profile `remarkable_folder` override (or the base `remarkable_folder`) determines the upload destination.
+
+### Upgrade note: filename format change from the pre-profile version
+
+Before device profiles, built PDFs were named `renewsable-YYYY-MM-DD.pdf`. Every build now always includes the profile suffix (`-rm2` by default), so after the first post-upgrade run you will have one stranded un-suffixed file on the reMarkable cloud from your last pre-upgrade build — delete it once on the tablet. Subsequent days converge to `renewsable-YYYY-MM-DD-rm2.pdf` and there is no further drift.
+
 ## Daily operation
 
 Nothing. The `systemd --user` timer fires at `schedule_time`, `Builder` fetches feeds and invokes `goosepaper`, `Uploader` invokes `rmapi put --force`, and the paper shows up on the tablet.
