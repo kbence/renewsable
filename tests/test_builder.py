@@ -51,6 +51,11 @@ from renewsable import builder as builder_mod
 from renewsable.builder import Builder
 from renewsable.config import Config
 from renewsable.errors import BuildError
+from renewsable.profiles import BUILTIN_PROFILES, render_css
+
+
+# Default profile used by tests that don't care which profile is active.
+_DEFAULT_PROFILE = BUILTIN_PROFILES["rm2"]
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -183,9 +188,9 @@ def test_build_happy_path_produces_pdf_with_magic_bytes(tmp_path, monkeypatch):
     _allow_all_robots(monkeypatch)
 
     today = datetime.date(2026, 4, 19)
-    result = Builder(cfg).build(today=today)
+    result = Builder(cfg).build(_DEFAULT_PROFILE, today=today)
 
-    assert result == cfg.output_dir / "renewsable-2026-04-19.pdf"
+    assert result == cfg.output_dir / "renewsable-2026-04-19-rm2.pdf"
     assert result.is_file()
     assert result.stat().st_size > 0
     with result.open("rb") as fh:
@@ -209,8 +214,8 @@ def test_build_filename_uses_provided_today(tmp_path, monkeypatch):
         datetime.date(2026, 4, 19),
         datetime.date(2027, 12, 31),
     ]:
-        out = Builder(cfg).build(today=d)
-        assert out.name == f"renewsable-{d.isoformat()}.pdf"
+        out = Builder(cfg).build(_DEFAULT_PROFILE, today=d)
+        assert out.name == f"renewsable-{d.isoformat()}-rm2.pdf"
 
 
 def test_build_defaults_to_today_when_date_omitted(tmp_path, monkeypatch):
@@ -220,9 +225,9 @@ def test_build_defaults_to_today_when_date_omitted(tmp_path, monkeypatch):
     _no_sleep(monkeypatch)
     _allow_all_robots(monkeypatch)
 
-    out = Builder(cfg).build()
+    out = Builder(cfg).build(_DEFAULT_PROFILE)
     today = datetime.date.today()
-    assert out.name == f"renewsable-{today.isoformat()}.pdf"
+    assert out.name == f"renewsable-{today.isoformat()}-rm2.pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -238,11 +243,11 @@ def test_build_twice_same_date_overwrites(tmp_path, monkeypatch):
 
     today = datetime.date(2026, 4, 19)
     b = Builder(cfg)
-    out1 = b.build(today=today)
+    out1 = b.build(_DEFAULT_PROFILE, today=today)
     assert out1.is_file()
     # Write something different to the file so we can detect overwrite.
     out1.write_bytes(b"%PDF-0.0\nsentinel\n")
-    out2 = b.build(today=today)
+    out2 = b.build(_DEFAULT_PROFILE, today=today)
 
     assert out2 == out1
     # After the second build the fake goosepaper has replaced the sentinel
@@ -276,7 +281,7 @@ def test_build_raises_when_every_feed_fails(tmp_path, monkeypatch):
     _allow_all_robots(monkeypatch)
 
     with pytest.raises(BuildError):
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     # No partial PDF should remain.
     pdfs = list(cfg.output_dir.glob("renewsable-*.pdf")) if cfg.output_dir.exists() else []
@@ -309,7 +314,7 @@ def test_build_tolerates_one_bad_feed(tmp_path, monkeypatch, caplog):
     _allow_all_robots(monkeypatch)
 
     caplog.set_level(logging.WARNING, logger="renewsable.builder")
-    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    out = Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert out.is_file()
     # bad.example was tried retries-many times; good.example once.
@@ -344,7 +349,7 @@ def test_feed_fetch_retries_bounded_with_exponential_backoff(tmp_path, monkeypat
     _allow_all_robots(monkeypatch)
 
     with pytest.raises(BuildError):
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     # Exactly feed_fetch_retries total attempts (not retries-on-top-of-one).
     assert len(calls) == cfg.feed_fetch_retries
@@ -369,7 +374,7 @@ def test_feed_fetch_succeeds_before_retries_exhausted(tmp_path, monkeypatch):
     sleeps = _no_sleep(monkeypatch)
     _allow_all_robots(monkeypatch)
 
-    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    out = Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
     assert out.is_file()
     # Exactly 3 urlopen calls; 2 sleeps between the 3 attempts.
     assert attempts["n"] == 3
@@ -394,7 +399,7 @@ def test_user_agent_header_is_config_user_agent(tmp_path, monkeypatch):
     _no_sleep(monkeypatch)
     _allow_all_robots(monkeypatch)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert captured_requests, "urlopen should have been called"
     req = captured_requests[0]
@@ -434,7 +439,7 @@ def test_robots_txt_disallow_skips_feed_but_build_continues(tmp_path, monkeypatc
     _no_sleep(monkeypatch)
 
     caplog.set_level(logging.WARNING, logger="renewsable.builder")
-    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    out = Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
     assert out.is_file()
 
     # The disallowed feed was skipped without ever hitting the rss_path.
@@ -466,7 +471,7 @@ def test_robots_txt_failure_is_treated_as_allowed(tmp_path, monkeypatch):
     _install_network(monkeypatch, handler)
     _no_sleep(monkeypatch)
 
-    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    out = Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
     assert out.is_file()
 
 
@@ -489,7 +494,7 @@ def test_robots_txt_fetched_once_per_host(tmp_path, monkeypatch):
     urlopener = _install_network(monkeypatch, handler)
     _no_sleep(monkeypatch)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     robots_fetches = [u for u in urlopener.url_calls if u.endswith("/robots.txt")]
     assert robots_fetches == ["https://example.com/robots.txt"]
@@ -546,7 +551,7 @@ def test_goosepaper_nonzero_exit_raises_build_error(tmp_path, monkeypatch, caplo
 
     caplog.set_level(logging.WARNING, logger="renewsable.builder")
     with pytest.raises(BuildError) as excinfo:
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert "2" in str(excinfo.value) or "goosepaper" in str(excinfo.value).lower()
     assert calls, "goosepaper should have been invoked"
@@ -570,7 +575,7 @@ def test_goosepaper_success_without_pdf_raises_build_error(tmp_path, monkeypatch
     _install_fake_subprocess(monkeypatch, returncode=0, write_pdf=False)
 
     with pytest.raises(BuildError):
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     pdfs = list(cfg.output_dir.glob("renewsable-*.pdf")) if cfg.output_dir.exists() else []
     assert pdfs == []
@@ -594,7 +599,7 @@ def test_goosepaper_writes_non_pdf_raises_and_cleans_up(tmp_path, monkeypatch):
     )
 
     with pytest.raises(BuildError):
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     # The non-PDF file must have been deleted so a later upload cannot grab it.
     pdfs = list(cfg.output_dir.glob("renewsable-*.pdf")) if cfg.output_dir.exists() else []
@@ -619,7 +624,7 @@ def test_goosepaper_writes_empty_file_raises_and_cleans_up(tmp_path, monkeypatch
     )
 
     with pytest.raises(BuildError):
-        Builder(cfg).build(today=datetime.date(2026, 4, 19))
+        Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     pdfs = list(cfg.output_dir.glob("renewsable-*.pdf")) if cfg.output_dir.exists() else []
     assert pdfs == []
@@ -637,7 +642,7 @@ def test_goosepaper_invoked_with_expected_argv_and_flags(tmp_path, monkeypatch):
     _allow_all_robots(monkeypatch)
     calls = _install_fake_subprocess(monkeypatch, returncode=0, write_pdf=True)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert len(calls) == 1
     argv = calls[0]["argv"]
@@ -652,7 +657,7 @@ def test_goosepaper_invoked_with_expected_argv_and_flags(tmp_path, monkeypatch):
     # -o <output.pdf> is the expected output path.
     assert "-o" in argv
     output_arg = argv[argv.index("-o") + 1]
-    assert output_arg == str(cfg.output_dir / "renewsable-2026-04-19.pdf")
+    assert output_arg == str(cfg.output_dir / "renewsable-2026-04-19-rm2.pdf")
     # --noupload is present (defangs goosepaper's broken upload path).
     assert "--noupload" in argv
     # capture_output=True, text=True, check=False, timeout set.
@@ -704,7 +709,7 @@ def test_prepared_config_rewrites_rss_path_to_local_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builder_mod.subprocess, "run", fake_run, raising=True)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     # The original URL is gone; the story config otherwise passes through
     # (limit=3 is preserved).
@@ -739,7 +744,7 @@ def test_telex_hu_is_accepted_and_bytes_passed_through(tmp_path, monkeypatch):
     _no_sleep(monkeypatch)
     _allow_all_robots(monkeypatch)
 
-    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    out = Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
     assert out.is_file()
 
 
@@ -782,7 +787,7 @@ def test_non_rss_stories_pass_through_without_fetch(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builder_mod.subprocess, "run", fake_run, raising=True)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     stories = captured["data"]["stories"]
     assert len(stories) == 2
@@ -821,7 +826,7 @@ def test_font_size_passed_to_goosepaper_config_when_set(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builder_mod.subprocess, "run", fake_run, raising=True)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert captured["data"].get("font_size") == 13
 
@@ -844,6 +849,174 @@ def test_font_size_omitted_when_none(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builder_mod.subprocess, "run", fake_run, raising=True)
 
-    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    Builder(cfg).build(_DEFAULT_PROFILE, today=datetime.date(2026, 4, 19))
 
     assert "font_size" not in captured["data"]
+
+
+# ---------------------------------------------------------------------------
+# Device profile plumbing (Task 3.1, Reqs 2.1-2.4, 5.1-5.2, 6.2, 8.1-8.2)
+# ---------------------------------------------------------------------------
+
+
+def _install_capturing_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    """Replace subprocess.run with a double that captures argv/kwargs and also
+    snapshots the profile CSS file (``<cwd>/styles/<name>.css``) **before**
+    returning, since the TemporaryDirectory disappears when build() exits.
+    """
+    captured: dict[str, Any] = {"calls": []}
+
+    def fake_run(argv: list[str], **kwargs: Any) -> Any:
+        call: dict[str, Any] = {"argv": list(argv), "kwargs": dict(kwargs)}
+        # Capture the styles dir contents before the tempdir cleanup.
+        cwd = kwargs.get("cwd")
+        if cwd is not None:
+            styles_dir = Path(cwd) / "styles"
+            if styles_dir.is_dir():
+                call["styles_files"] = {
+                    p.name: p.read_text(encoding="utf-8")
+                    for p in styles_dir.iterdir()
+                }
+            else:
+                call["styles_files"] = None
+        # Write a stub PDF to the -o target so validation passes.
+        if "-o" in argv:
+            out_idx = argv.index("-o") + 1
+            out_path = Path(argv[out_idx])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"%PDF-1.4\n%stub\n%%EOF\n")
+        captured["calls"].append(call)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(builder_mod.subprocess, "run", fake_run, raising=True)
+    return captured
+
+
+def test_goosepaper_invoked_with_style_flag(tmp_path, monkeypatch):
+    """argv includes ``--style <profile.name>``."""
+    cfg = _make_config(tmp_path)
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    captured = _install_capturing_subprocess(monkeypatch)
+
+    Builder(cfg).build(BUILTIN_PROFILES["rm2"], today=datetime.date(2026, 4, 19))
+
+    assert len(captured["calls"]) == 1
+    argv = captured["calls"][0]["argv"]
+    assert "--style" in argv
+    assert argv[argv.index("--style") + 1] == "rm2"
+
+
+def test_goosepaper_invoked_with_cwd_tmpdir(tmp_path, monkeypatch):
+    """subprocess.run was invoked with cwd pointing at the per-run tmpdir
+    (the one that also contains the rendered styles/<name>.css file)."""
+    cfg = _make_config(tmp_path)
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    captured = _install_capturing_subprocess(monkeypatch)
+
+    Builder(cfg).build(BUILTIN_PROFILES["rm2"], today=datetime.date(2026, 4, 19))
+
+    kwargs = captured["calls"][0]["kwargs"]
+    assert "cwd" in kwargs, "subprocess.run must receive a cwd kwarg"
+    cwd = kwargs["cwd"]
+    # cwd may be str or Path; coerce for the assertion.
+    cwd_path = Path(cwd)
+    # The -c goosepaper config lives in the same tmpdir; sanity-check.
+    argv = captured["calls"][0]["argv"]
+    config_arg = Path(argv[argv.index("-c") + 1])
+    assert config_arg.parent == cwd_path
+
+
+def test_styles_directory_contains_rendered_css(tmp_path, monkeypatch):
+    """``<tmpdir>/styles/<profile.name>.css`` contents == render_css(profile)."""
+    cfg = _make_config(tmp_path)
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    captured = _install_capturing_subprocess(monkeypatch)
+
+    profile = BUILTIN_PROFILES["rm2"]
+    Builder(cfg).build(profile, today=datetime.date(2026, 4, 19))
+
+    styles_files = captured["calls"][0]["styles_files"]
+    assert styles_files is not None, "styles/ directory missing in tmpdir"
+    assert "rm2.css" in styles_files
+    assert styles_files["rm2.css"] == render_css(profile)
+
+
+def test_output_filename_includes_profile_suffix(tmp_path, monkeypatch):
+    """Filename is always renewsable-<date>-<profile>.pdf."""
+    cfg = _make_config(tmp_path)
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    _install_capturing_subprocess(monkeypatch)
+
+    out = Builder(cfg).build(
+        BUILTIN_PROFILES["rm2"], today=datetime.date(2026, 4, 19)
+    )
+    assert out.name == "renewsable-2026-04-19-rm2.pdf"
+
+
+def test_paper_pro_move_suffix(tmp_path, monkeypatch):
+    """Paper Pro Move profile yields renewsable-<date>-paper_pro_move.pdf
+    with the correct CSS written and --style argv."""
+    cfg = _make_config(tmp_path)
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    captured = _install_capturing_subprocess(monkeypatch)
+
+    profile = BUILTIN_PROFILES["paper_pro_move"]
+    out = Builder(cfg).build(profile, today=datetime.date(2026, 4, 19))
+
+    assert out.name == "renewsable-2026-04-19-paper_pro_move.pdf"
+    argv = captured["calls"][0]["argv"]
+    assert argv[argv.index("--style") + 1] == "paper_pro_move"
+    styles_files = captured["calls"][0]["styles_files"]
+    assert styles_files == {"paper_pro_move.css": render_css(profile)}
+
+
+def test_limit_unchanged_across_profiles(tmp_path, monkeypatch):
+    """Two back-to-back builds under different profiles must not mutate
+    the config's stories[].config.limit values (Req 8.1, 8.2)."""
+    cfg = _make_config(
+        tmp_path,
+        stories=[
+            {
+                "provider": "rss",
+                "config": {"rss_path": "https://a.example/rss", "limit": 5},
+            },
+            {
+                "provider": "rss",
+                "config": {"rss_path": "https://b.example/rss", "limit": 2},
+            },
+        ],
+    )
+    _install_network(monkeypatch, lambda req: _FakeResponse(b"<rss/>"))
+    _no_sleep(monkeypatch)
+    _allow_all_robots(monkeypatch)
+    _install_capturing_subprocess(monkeypatch)
+
+    builder = Builder(cfg)
+
+    out1 = builder.build(
+        BUILTIN_PROFILES["rm2"], today=datetime.date(2026, 4, 19)
+    )
+    assert out1.name == "renewsable-2026-04-19-rm2.pdf"
+    # Limit values must be untouched after the first build.
+    assert cfg.stories[0]["config"]["limit"] == 5
+    assert cfg.stories[1]["config"]["limit"] == 2
+
+    out2 = builder.build(
+        BUILTIN_PROFILES["paper_pro_move"], today=datetime.date(2026, 4, 19)
+    )
+    assert out2.name == "renewsable-2026-04-19-paper_pro_move.pdf"
+    # And after the second build under a different profile.
+    assert cfg.stories[0]["config"]["limit"] == 5
+    assert cfg.stories[1]["config"]["limit"] == 2

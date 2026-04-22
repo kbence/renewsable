@@ -46,7 +46,7 @@
 
 ## 3. Builder extension
 
-- [ ] 3.1 Change `Builder.build` to accept a profile and render per-profile CSS
+- [x] 3.1 Change `Builder.build` to accept a profile and render per-profile CSS
   - Change the signature to `build(self, profile: DeviceProfile, today: datetime.date | None = None) -> Path`
   - Build the output filename as `renewsable-<YYYY-MM-DD>-<profile.name>.pdf` on every run (no conditional suffix)
   - Within the existing `TemporaryDirectory`, create `styles/` and write `profiles.render_css(profile)` to `styles/<profile.name>.css`

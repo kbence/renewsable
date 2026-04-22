@@ -70,8 +70,10 @@ import urllib.robotparser
 from pathlib import Path
 from typing import Any
 
+from . import profiles as _profiles
 from .config import Config
 from .errors import BuildError
+from .profiles import DeviceProfile
 
 
 __all__ = ["Builder"]
@@ -109,11 +111,25 @@ class Builder:
     # Public API
     # ------------------------------------------------------------------
 
-    def build(self, today: _dt.date | None = None) -> Path:
-        """Produce today's PDF and return its absolute path.
+    def build(
+        self,
+        profile: DeviceProfile,
+        today: _dt.date | None = None,
+    ) -> Path:
+        """Produce today's PDF for ``profile`` and return its absolute path.
 
         ``today`` is overridable for testability; without it we take the
-        local calendar date. The filename always embeds that date.
+        local calendar date. The filename always embeds that date **and**
+        the profile name, as ``renewsable-<YYYY-MM-DD>-<profile.name>.pdf``
+        — the suffix is present on every build regardless of how many
+        profiles the config declares (device-profiles spec Req 6.2).
+
+        The profile's CSS (``profiles.render_css(profile)``) is written
+        into a per-run ``<tmpdir>/styles/<profile.name>.css`` and
+        goosepaper is invoked with ``cwd=<tmpdir>`` and
+        ``--style <profile.name>`` so its CWD-relative style resolver
+        picks the file up. ``stories[].config.limit`` is never read or
+        mutated in the profile-handling path (Req 8.1).
 
         Raises
         ------
@@ -128,7 +144,10 @@ class Builder:
         self._robots_cache = {}
 
         cfg.output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = cfg.output_dir / f"renewsable-{today.isoformat()}.pdf"
+        output_path = (
+            cfg.output_dir
+            / f"renewsable-{today.isoformat()}-{profile.name}.pdf"
+        )
 
         with tempfile.TemporaryDirectory(prefix="renewsable-") as tmp_str:
             tmp_dir = Path(tmp_str)
@@ -147,10 +166,21 @@ class Builder:
                     ),
                 )
 
+            # Write the per-profile CSS into <tmpdir>/styles/<name>.css so
+            # goosepaper's CWD-relative style resolver (pathlib.Path("./styles/")
+            # / style) picks it up when we run the subprocess with cwd=tmp_dir.
+            styles_dir = tmp_dir / "styles"
+            styles_dir.mkdir(parents=True, exist_ok=True)
+            (styles_dir / f"{profile.name}.css").write_text(
+                _profiles.render_css(profile), encoding="utf-8"
+            )
+
             goosepaper_config_path = tmp_dir / "goosepaper-config.json"
             self._write_goosepaper_config(goosepaper_config_path, prepared_stories)
 
-            self._run_goosepaper(goosepaper_config_path, output_path)
+            self._run_goosepaper(
+                goosepaper_config_path, output_path, profile=profile, cwd=tmp_dir
+            )
 
         self._validate_pdf(output_path)
         return output_path
@@ -245,12 +275,24 @@ class Builder:
     # Stage: invoke goosepaper
     # ------------------------------------------------------------------
 
-    def _run_goosepaper(self, config_path: Path, output_path: Path) -> None:
-        """Run ``goosepaper -c config -o output --noupload``.
+    def _run_goosepaper(
+        self,
+        config_path: Path,
+        output_path: Path,
+        *,
+        profile: DeviceProfile,
+        cwd: Path,
+    ) -> None:
+        """Run ``goosepaper -c config -o output --noupload --style <profile>``.
 
         ``--noupload`` is goosepaper's switch that bypasses its (broken for
         us) built-in upload path; renewsable always uploads via its own
         Uploader component.
+
+        ``--style <profile.name>`` tells goosepaper to read
+        ``./styles/<profile.name>.css`` relative to its CWD; we pass
+        ``cwd=<tmpdir>`` so it finds the per-run rendered CSS file that
+        :meth:`build` has written there.
 
         Captures stdout/stderr into memory and forwards them to the logger:
         stderr → WARNING when goosepaper exits non-zero, DEBUG otherwise.
@@ -266,6 +308,8 @@ class Builder:
             "-o",
             str(output_path),
             "--noupload",
+            "--style",
+            profile.name,
         ]
         logger.info("invoking goosepaper: %s", " ".join(argv))
 
@@ -276,6 +320,7 @@ class Builder:
                 text=True,
                 timeout=self._config.subprocess_timeout_s,
                 check=False,
+                cwd=str(cwd),
             )
         except subprocess.TimeoutExpired as exc:
             raise BuildError(
