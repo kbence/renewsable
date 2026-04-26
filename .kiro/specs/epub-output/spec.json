@@ -1,0 +1,22 @@
+{
+  "feature_name": "epub-output",
+  "created_at": "2026-04-26T04:41:09Z",
+  "updated_at": "2026-04-26T05:35:00Z",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
