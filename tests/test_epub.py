@@ -373,6 +373,38 @@ def test_image_dedup_across_articles(
         assert len(image_names) == 1, f"expected one image item, got {image_names!r}"
 
 
+def test_stylesheet_registered_with_heading_alignment_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_urlopen(monkeypatch, {})
+    out = tmp_path / "book.epub"
+    epub_mod.assemble(
+        [_make_article(1, "<p>hi</p>"), _make_article(2, "<p>two</p>")],
+        today=datetime.date(2026, 4, 26),
+        output_path=out,
+        ua="renewsable-test/1.0",
+        retries=1,
+        backoff_s=0.0,
+    )
+    book = ebooklib_epub.read_epub(str(out))
+    css_items = [it for it in book.get_items() if it.media_type == "text/css"]
+    assert len(css_items) == 1, f"expected one css item, got {css_items!r}"
+    css_text = css_items[0].get_content().decode("utf-8")
+    assert "h1" in css_text
+    assert "text-align" in css_text
+    assert "left" in css_text
+
+    with _read_zip(out) as zf:
+        chapter_names = [
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapters/" in n
+        ]
+        assert chapter_names, "expected at least one chapter in zip"
+        for name in chapter_names:
+            content = zf.read(name).decode("utf-8")
+            assert 'rel="stylesheet"' in content
+            assert "../styles.css" in content
+
+
 def test_internal_failure_unlinks_partial_and_raises_build_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
