@@ -10,11 +10,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Bence Kiglics" }]
-
-[project.urls]
-Homepage = "https://github.com/kbence/renewsable"
-Repository = "https://github.com/kbence/renewsable"
-Issues = "https://github.com/kbence/renewsable/issues"
 dependencies = [
     "click>=8.1",
     "ebooklib>=0.18",
@@ -33,6 +28,11 @@ dependencies = [
     # project`.
     "lxml_html_clean",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kbence/renewsable"
+Repository = "https://github.com/kbence/renewsable"
+Issues = "https://github.com/kbence/renewsable/issues"
 
 [project.optional-dependencies]
 dev = ["pytest"]
