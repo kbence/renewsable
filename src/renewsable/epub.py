@@ -64,6 +64,12 @@ _XHTML_WRAPPER = (
     "</html>\n"
 )
 
+# Minimal corrective stylesheet: the reMarkable EPUB reader's default body
+# style justifies all flow text including headings, which produces awkward
+# gaps on short or two-line article titles. Override only heading alignment;
+# leave typography (font, size, line-height) to the reader's preferences.
+_DEFAULT_STYLESHEET = "h1, h2, h3, h4, h5, h6 { text-align: left; }\n"
+
 # Image-fetch policy: a successful fetch must yield bytes whose effective
 # MIME type is image/*. Anything else is treated as a fetch failure.
 _IMAGE_MIME_PREFIX = "image/"
@@ -100,6 +106,14 @@ def assemble(
         )
         book.set_identifier(f"urn:uuid:{deterministic_uuid}")
 
+        stylesheet_item = ebooklib_epub.EpubItem(
+            uid="styles",
+            file_name="styles.css",
+            media_type="text/css",
+            content=_DEFAULT_STYLESHEET.encode("utf-8"),
+        )
+        book.add_item(stylesheet_item)
+
         # Per-URL dedup cache: url -> (file_name, EpubItem).
         image_cache: dict[str, tuple[str, ebooklib_epub.EpubItem]] = {}
 
@@ -128,6 +142,9 @@ def assemble(
                 uid=chapter_uid,
             )
             chapter.content = chapter_html
+            chapter.add_link(
+                href="../styles.css", rel="stylesheet", type="text/css"
+            )
             book.add_item(chapter)
             chapters.append(chapter)
 
