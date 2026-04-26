@@ -5,24 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "renewsable"
 version = "0.1.0"
-description = "Daily news digest PDF pipeline for reMarkable 2, scheduled on a Raspberry Pi."
+description = "Daily news digest EPUB pipeline for reMarkable 2, scheduled on a Raspberry Pi."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "bnc" }]
 dependencies = [
     "click>=8.1",
-    # PyPI goosepaper==0.7.1 does not exist; 0.7.0 has a broken sdist.
-    # Pin via git to the kbence fork, which carries a one-line fix for
-    # the per-provider `limit` being silently capped at the method-level
-    # default (upstream issue: config `limit: 15` still produced 5 items).
-    # Pinned to an exact commit SHA so the build is reproducible.
-    "goosepaper @ git+https://github.com/kbence/goosepaper@02887c2",
-    # goosepaper's __main__ eagerly imports rmapy (legacy upload client) but
-    # does not declare it. We never use that code path, but importing
-    # goosepaper via `goosepaper --help` fails without it. Declared here
-    # so the transitive import resolves on the Pi.
-    "rmapy",
+    "ebooklib>=0.18",
+    "feedparser>=6.0",
     # readability-lxml 0.8.4.1 regressed its encoding-detection path: its
     # RE_CHARSET/RE_PRAGMA/RE_XML regexes are compiled as str, but some
     # article responses reach them as bytes and raise

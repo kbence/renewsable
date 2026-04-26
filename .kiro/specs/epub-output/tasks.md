@@ -2,14 +2,14 @@
 
 - [ ] 1. Foundation: dependencies and shared HTTP primitives
 
-- [ ] 1.1 Update project dependencies for the EPUB pipeline
+- [x] 1.1 Update project dependencies for the EPUB pipeline
   - Drop `goosepaper` and `rmapy` from `pyproject.toml` runtime dependencies, including the comment block that explained their pins.
   - Add `ebooklib` and `feedparser` as runtime dependencies pinned to a current stable release each.
   - Update the project `description` from "Daily news digest PDF pipeline …" to "Daily news digest EPUB pipeline …".
   - Observable completion: `pip install -e .` succeeds in a clean venv with no goosepaper/rmapy in the resolved dependency tree, and `python -c "import ebooklib, feedparser"` returns 0.
   - _Requirements: 2.2_
 
-- [ ] 1.2 (P) Extract shared HTTP and robots primitives into a dedicated module
+- [x] 1.2 (P) Extract shared HTTP and robots primitives into a dedicated module
   - Add a new `http` module exposing `fetch_with_retry(url, *, ua, retries, backoff_s, timeout_s=30.0)` and `robots_allows(url, *, cache, ua, timeout_s=30.0)` plus a `RobotsCache` type alias.
   - Lift the implementations from the existing `Builder._fetch_with_retry` and `Builder._robots_allows` verbatim, including the per-host cache key scheme and the fail-open semantics for unparseable or unreachable robots.txt.
   - Preserve module-level `urllib_request` and `_time` aliases so existing monkeypatch-based tests continue to work after relocation.
