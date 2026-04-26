@@ -68,6 +68,26 @@ _CLEANER = Cleaner(
 )
 
 
+# GH #1: Cleaner strips `style=` but leaves legacy HTML 4 presentational
+# attributes intact. EPUB readers (incl. reMarkable's) still honor them — an
+# `<img align="right" hspace="5">` floats and the surrounding text wraps,
+# producing visible overlap on a reflowable column. Strip them after Cleaner.
+# `width`/`height` on <img> are intentionally NOT in this list: they're useful
+# aspect-ratio hints and don't trigger floating.
+_LEGACY_PRESENTATIONAL_ATTRS = frozenset(
+    {
+        "align",
+        "valign",
+        "hspace",
+        "vspace",
+        "border",
+        "bgcolor",
+        "cellpadding",
+        "cellspacing",
+    }
+)
+
+
 @dataclass(frozen=True)
 class Article:
     """A single ready-to-publish article.
@@ -287,6 +307,10 @@ def _sanitize_and_resolve(body_html: str, base_url: str) -> str:
     except Exception as exc:  # pragma: no cover - cleaner is permissive
         logger.info("Cleaner failed for %s: %s", base_url, exc)
         return ""
+
+    for el in tree.iter():
+        for attr in _LEGACY_PRESENTATIONAL_ATTRS.intersection(el.attrib):
+            del el.attrib[attr]
 
     # Resolve <img src> and <a href>.
     for img in tree.iter("img"):
