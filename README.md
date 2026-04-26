@@ -4,6 +4,9 @@ A daily news digest for the reMarkable 2, delivered as an EPUB every morning by 
 
 Pipeline: configurable RSS feeds → in-process article extraction (`feedparser` + `readability-lxml`) → `ebooklib` EPUB assembly → `rmapi` upload to your reMarkable cloud → `systemd` user timer schedules the daily run.
 
+> [!IMPORTANT]
+> **Built with substantial AI assistance.** This project's requirements, design, implementation, and tests were produced through close collaboration with large language models under a spec-driven workflow (`.kiro/specs/`). Every change is human-reviewed before commit, but the code reflects that pairing — expect more LLM fingerprints than in a typical hand-written codebase. If that disqualifies the project for your use case, that is a valid call; if it doesn't, you are warmly welcome.
+
 ## Status
 
 - Core pipeline (build + upload + scheduled run + pairing) is implemented and unit-tested.
@@ -126,7 +129,7 @@ The config is a single JSON object. Unknown top-level keys are rejected to catch
 | `stories` | list of `{provider, config}` objects | yes | — (must be non-empty) | RSS feed sources. Each entry is exactly `{"provider": "rss", "config": {"rss_path": "<http(s) URL>", "limit": <optional positive int>}}`. Unknown keys at either level are rejected. |
 | `output_dir` | string path (supports `~`) | no | `$XDG_STATE_HOME/renewsable/out` (else `~/.local/state/renewsable/out`) | Where built EPUBs are written locally. |
 | `log_dir` | string path (supports `~`) | no | `$XDG_STATE_HOME/renewsable/logs` (else `~/.local/state/renewsable/logs`) | Where the rotating plain-text log file lands. |
-| `user_agent` | string | no | `"renewsable/0.1 (+https://github.com/bnc/renewsable)"` | User-Agent sent on feed and article fetches. |
+| `user_agent` | string | no | `"renewsable/0.1 (+https://github.com/kbence/renewsable)"` | User-Agent sent on feed and article fetches. |
 | `rmapi_bin` | string | no | `"rmapi"` | Command name or absolute path to the `rmapi` executable. Pi installs drop it at `.venv/bin/rmapi`. |
 | `feed_fetch_retries` | integer > 0 | no | `3` | Attempts per feed before giving up (the feed is then skipped). |
 | `feed_fetch_backoff_s` | number > 0 | no | `1.0` | Base seconds between feed-fetch retries. |
@@ -238,4 +241,4 @@ Single-process Python orchestrator: `Config → Builder (in-process article extr
 
 ## License
 
-MIT. This is a personal project; pick a different license before publishing if you feel strongly about it.
+MIT — see [`LICENSE`](./LICENSE).

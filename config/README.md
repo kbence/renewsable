@@ -41,7 +41,7 @@ falling back to a default.
 | `output_dir`           | string (path)    | no       | XDG state dir (`$XDG_STATE_HOME/renewsable` or `~/.local/state/renewsable`) | Where generated PDFs / EPUBs are written. Supports `~` expansion.         |
 | `font_size`            | integer          | no       | goosepaper default                       | Forwarded to goosepaper when present.                                    |
 | `log_dir`              | string (path)    | no       | XDG state dir log subfolder              | Where rotating log files land. Supports `~` expansion.                   |
-| `user_agent`           | string           | no       | `renewsable/0.1 (+https://github.com/bnc/renewsable)` | User-Agent sent on feed fetches.                           |
+| `user_agent`           | string           | no       | `renewsable/0.1 (+https://github.com/kbence/renewsable)` | User-Agent sent on feed fetches.                           |
 | `goosepaper_bin`       | string           | no       | `goosepaper`                             | Command name or absolute path to the goosepaper executable.             |
 | `rmapi_bin`            | string           | no       | `rmapi`                                  | Command name or absolute path to the rmapi executable.                   |
 | `feed_fetch_retries`   | integer > 0      | no       | `3`                                      | How many times a failing feed fetch is retried before giving up.         |

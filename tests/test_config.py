@@ -118,7 +118,7 @@ class TestLoadValidFixture:
     def test_defaults_applied_for_omitted_optional_fields(self, fake_home):
         """Requirement 1.6: documented defaults for optional fields."""
         cfg = Config.load(VALID_FIXTURE)
-        assert cfg.user_agent == "renewsable/0.1 (+https://github.com/bnc/renewsable)"
+        assert cfg.user_agent == "renewsable/0.1 (+https://github.com/kbence/renewsable)"
         assert cfg.rmapi_bin == "rmapi"
         assert cfg.feed_fetch_retries == 3
         assert cfg.feed_fetch_backoff_s == 1.0

@@ -107,7 +107,7 @@ class Config:
     remarkable_folder: str = "/News"
     stories: list[dict[str, Any]] = field(default_factory=list)
     log_dir: Path | None = None
-    user_agent: str = "renewsable/0.1 (+https://github.com/bnc/renewsable)"
+    user_agent: str = "renewsable/0.1 (+https://github.com/kbence/renewsable)"
     rmapi_bin: str = "rmapi"
     feed_fetch_retries: int = 3
     feed_fetch_backoff_s: float = 1.0
