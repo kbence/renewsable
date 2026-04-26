@@ -444,3 +444,49 @@ def test_entry_without_link_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
     assert out == []
+
+
+def test_legacy_presentational_attrs_stripped_from_img() -> None:
+    """GH #1: legacy HTML 4 presentational attributes must not survive sanitization.
+
+    Without stripping, EPUB readers honor ``align="right"`` / ``hspace`` /
+    ``vspace`` as float+margin and the surrounding text wraps around the image,
+    producing visible overlap on the reMarkable's reflowable column.
+    """
+    body = (
+        '<p>some body text</p>'
+        '<img src="https://example.com/x.png" align="right" '
+        'hspace="5" vspace="5" border="1" alt="x"/>'
+        '<table align="center" bgcolor="#fff" cellpadding="3" cellspacing="0">'
+        '<tr><td valign="top">cell</td></tr></table>'
+    )
+
+    out = articles_mod._sanitize_and_resolve(body, "https://example.com/article")
+
+    for attr in (
+        "align=",
+        "valign=",
+        "hspace=",
+        "vspace=",
+        "border=",
+        "bgcolor=",
+        "cellpadding=",
+        "cellspacing=",
+    ):
+        assert attr not in out, f"unexpected legacy attribute {attr!r} in {out!r}"
+    # The <img> itself must still be there with its src.
+    assert "https://example.com/x.png" in out
+
+
+def test_img_width_and_height_preserved() -> None:
+    """GH #1: width/height are intentionally outside the deny-list — they
+    serve as aspect-ratio hints for the reader. Lock that boundary."""
+    body = (
+        '<p>some body text</p>'
+        '<img src="https://example.com/x.png" width="320" height="240" alt="x"/>'
+    )
+
+    out = articles_mod._sanitize_and_resolve(body, "https://example.com/article")
+
+    assert 'width="320"' in out
+    assert 'height="240"' in out
