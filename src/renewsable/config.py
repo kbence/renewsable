@@ -1,7 +1,8 @@
 """Configuration loader and validator for renewsable.
 
-Design reference: the "Config" component block and "Data Models" persistent-
-file table in ``.kiro/specs/daily-paper/design.md``.
+Design reference: the "Config" component block, the "Data Models" persistent-
+file table, and the "Stories Schema (closed set, validated by Config.load)"
+section in ``.kiro/specs/epub-output/design.md``.
 
 Requirements covered:
 - 1.1 Settings live in one human-editable JSON file at a documented default
@@ -14,6 +15,8 @@ Requirements covered:
 - 1.5 Edits take effect on the next invocation (every ``Config.load`` is a
   fresh read; no module-level caching).
 - 1.6 Documented defaults for every optional field.
+- 2.4 No goosepaper-specific configuration keys; ``stories`` schema is owned
+  by renewsable (closed-set per-entry shape).
 
 Shape
 -----
@@ -21,16 +24,20 @@ Shape
 that callers can pass around without fear of mutation. Every field has a
 default at the dataclass level so the dataclass itself is constructible
 without arguments; the *real* invariants ("``stories`` non-empty",
-"``schedule_time`` parses as a clock") are enforced by ``validate()``, which
-``load()`` invokes before returning. This keeps the type-level contract and
-the runtime contract cleanly separated.
+"``schedule_time`` parses as a clock", "each ``stories`` entry matches the
+Stories Schema") are enforced by ``validate()``, which ``load()`` invokes
+before returning. This keeps the type-level contract and the runtime contract
+cleanly separated.
 
 Closed-set top-level keys
 -------------------------
 ``Config.load`` rejects any unknown top-level JSON key. This catches typos
 ("``stoires``", "``schedule_tlme``") that would otherwise silently fall back
 to a default and waste an entire scheduled run debugging "why didn't my new
-feed appear".
+feed appear". With goosepaper removed, keys such as ``goosepaper_bin``,
+``font_size``, ``subprocess_timeout_s``, ``device_profile``, and
+``device_profiles`` are no longer accepted — they raise ``ConfigError`` with
+a remediation that points at the new schema.
 """
 
 from __future__ import annotations
@@ -45,19 +52,12 @@ from typing import Any
 
 from . import paths
 from .errors import ConfigError
-from .profiles import BUILTIN_PROFILES, DeviceProfile, resolve as _resolve_profile
 
 
 __all__ = ["Config"]
 
 
 logger = logging.getLogger(__name__)
-
-
-# Input-only keys: accepted in the JSON payload but normalised into
-# ``device_profiles`` before the dataclass is constructed. They are not
-# dataclass fields and never appear on the resulting ``Config`` object.
-_PROFILE_INPUT_KEYS: frozenset[str] = frozenset({"device_profile", "device_profiles"})
 
 
 # ``HH:MM`` 24-hour clock. The pattern is intentionally strict (two digits
@@ -70,6 +70,22 @@ _SCHEDULE_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 # Fields whose values are paths and therefore need ``~`` expansion plus
 # ``resolve()`` to an absolute path before landing in the dataclass.
 _PATH_FIELDS: frozenset[str] = frozenset({"output_dir", "log_dir"})
+
+
+# Stories Schema (design.md "Stories Schema (closed set, validated by
+# Config.load)"). Each ``stories[i]`` must have exactly two top-level keys:
+# ``provider`` (string == "rss") and ``config`` (dict). Within ``config``,
+# ``rss_path`` is required (http(s) URL) and ``limit`` is optional (positive
+# int, no bool slip).
+_STORY_TOP_KEYS: frozenset[str] = frozenset({"provider", "config"})
+_STORY_CONFIG_REQUIRED: frozenset[str] = frozenset({"rss_path"})
+_STORY_CONFIG_OPTIONAL: frozenset[str] = frozenset({"limit"})
+_STORY_CONFIG_ALLOWED: frozenset[str] = _STORY_CONFIG_REQUIRED | _STORY_CONFIG_OPTIONAL
+_STORIES_SCHEMA_REMEDIATION = (
+    "each stories entry must have exactly the keys "
+    '{"provider": "rss", "config": {"rss_path": "<http(s) URL>", '
+    '"limit": <optional positive int>}}'
+)
 
 
 @dataclass(frozen=True)
@@ -90,19 +106,13 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path())
     remarkable_folder: str = "/News"
     stories: list[dict[str, Any]] = field(default_factory=list)
-    font_size: int | None = None
     log_dir: Path | None = None
     user_agent: str = "renewsable/0.1 (+https://github.com/bnc/renewsable)"
-    goosepaper_bin: str = "goosepaper"
     rmapi_bin: str = "rmapi"
     feed_fetch_retries: int = 3
     feed_fetch_backoff_s: float = 1.0
     upload_retries: int = 3
     upload_backoff_s: float = 2.0
-    subprocess_timeout_s: int = 180
-    device_profiles: list[DeviceProfile] = field(
-        default_factory=lambda: [BUILTIN_PROFILES["rm2"]]
-    )
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,48 +158,28 @@ class Config:
             )
 
         # ---- Phase 3: closed-set key check ----
-        # ``device_profile`` and ``device_profiles`` are input-only keys: the
-        # loader normalises them into the dataclass field ``device_profiles``
-        # (a list of :class:`DeviceProfile`). They are accepted in the JSON
-        # payload but never stored verbatim, and the two are mutually
-        # exclusive.
+        # With goosepaper and device profiles gone, the accepted top-level
+        # keys are exactly the dataclass field names. Anything else (e.g.,
+        # ``goosepaper_bin``, ``font_size``, ``device_profile``) is a typo
+        # or a leftover from a pre-EPUB config and must be flagged.
         dataclass_field_names = {f.name for f in fields(cls)}
-        accepted_input_keys = (
-            dataclass_field_names - {"device_profiles"}
-        ) | _PROFILE_INPUT_KEYS
         for key in data:
-            if key not in accepted_input_keys:
+            if key not in dataclass_field_names:
                 raise ConfigError(
                     f"unknown config field {key!r} in {cfg_path}",
                     remediation=(
                         f"remove this key or check for a typo; valid keys are: "
-                        f"{', '.join(sorted(accepted_input_keys))}"
+                        f"{', '.join(sorted(dataclass_field_names))}"
                     ),
                 )
-
-        if "device_profile" in data and "device_profiles" in data:
-            raise ConfigError(
-                f"config at {cfg_path} declares both 'device_profile' and "
-                f"'device_profiles'; choose one",
-                remediation="remove one of the keys",
-            )
 
         # ---- Phase 4: per-field type-check + path expansion ----
         kwargs: dict[str, Any] = {}
         for f in fields(cls):
-            if f.name == "device_profiles":
-                continue  # handled separately below
             if f.name not in data:
                 continue
             value = data[f.name]
             kwargs[f.name] = _coerce_field(cfg_path, f.name, value)
-
-        # ---- Phase 4b: normalise profile input shapes ----
-        profile_list = _normalise_device_profiles(cfg_path, data)
-        if profile_list is not None:
-            kwargs["device_profiles"] = profile_list
-        # else: leave unset so the dataclass default_factory + _apply_defaults
-        # supply the built-in rm2 profile and emit the DEBUG log.
 
         # ---- Phase 5: defaults for omitted optional fields ----
         kwargs = _apply_defaults(kwargs)
@@ -235,7 +225,9 @@ class Config:
                 f"starting with '/' (e.g. '/News'); got {self.remarkable_folder!r}",
             )
 
-        # stories: required, non-empty list of objects.
+        # stories: required, non-empty list of objects matching the Stories
+        # Schema (design.md "Stories Schema (closed set, validated by
+        # Config.load)").
         if not isinstance(self.stories, list):
             raise ConfigError(
                 f"config field 'stories' in {where}: expected list, got "
@@ -244,16 +236,12 @@ class Config:
         if len(self.stories) == 0:
             raise ConfigError(
                 f"config field 'stories' in {where} must be a non-empty list of "
-                f"goosepaper story objects",
+                f"story objects",
                 remediation="add at least one entry like "
                 '{"provider": "rss", "config": {"rss_path": "..."}}',
             )
         for i, story in enumerate(self.stories):
-            if not isinstance(story, dict):
-                raise ConfigError(
-                    f"config field 'stories[{i}]' in {where}: expected object, "
-                    f"got {type(story).__name__}",
-                )
+            _validate_story_entry(where, i, story)
 
         # output_dir: present and absolute (load() resolves; this guards
         # against direct ``Config(...)`` construction).
@@ -271,9 +259,8 @@ class Config:
                     f"absolute path; got {self.log_dir!r}",
                 )
 
-        # Bounded retry counts must be positive (Req. 9.2 / 9.3 talk about
-        # "small, bounded number of times" — zero would silently disable).
-        for name in ("feed_fetch_retries", "upload_retries", "subprocess_timeout_s"):
+        # Bounded retry counts must be positive (zero would silently disable).
+        for name in ("feed_fetch_retries", "upload_retries"):
             value = getattr(self, name)
             if not isinstance(value, int) or value <= 0:
                 raise ConfigError(
@@ -286,12 +273,6 @@ class Config:
                 raise ConfigError(
                     f"config field {name!r} in {where}: must be a positive number; "
                     f"got {value!r}",
-                )
-        if self.font_size is not None:
-            if not isinstance(self.font_size, int) or self.font_size <= 0:
-                raise ConfigError(
-                    f"config field 'font_size' in {where}: must be a positive integer "
-                    f"or omitted; got {self.font_size!r}",
                 )
 
 
@@ -309,15 +290,12 @@ _TYPE_RULES: dict[str, tuple[str, tuple[type, ...]]] = {
     "schedule_time": ("string", (str,)),
     "remarkable_folder": ("string", (str,)),
     "stories": ("list", (list,)),
-    "font_size": ("integer", (int,)),
     "user_agent": ("string", (str,)),
-    "goosepaper_bin": ("string", (str,)),
     "rmapi_bin": ("string", (str,)),
     "feed_fetch_retries": ("integer", (int,)),
     "feed_fetch_backoff_s": ("number", (int, float)),
     "upload_retries": ("integer", (int,)),
     "upload_backoff_s": ("number", (int, float)),
-    "subprocess_timeout_s": ("integer", (int,)),
     # Path fields accept a string (file path) only.
     "output_dir": ("string (filesystem path)", (str,)),
     "log_dir": ("string (filesystem path)", (str,)),
@@ -365,8 +343,8 @@ def _coerce_field(cfg_path: Path, name: str, value: Any) -> Any:
         return Path(value).expanduser().resolve()
 
     # Pass-through for everything else; the dataclass holds the value
-    # verbatim. ``stories`` is opaque to renewsable beyond "list of dicts"
-    # — goosepaper owns deeper validation (per design Implementation Notes).
+    # verbatim. ``stories`` deeper validation happens in ``Config.validate``
+    # (Stories Schema, design.md).
     return value
 
 
@@ -383,117 +361,100 @@ def _apply_defaults(kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs["output_dir"] = paths.default_output_dir()
     if "log_dir" not in kwargs:
         kwargs["log_dir"] = paths.default_log_dir()
-    if "device_profiles" not in kwargs:
-        # No profile fields declared — fall back to the default rm2 profile.
-        # DEBUG (not WARNING) because this is the expected single-profile
-        # path for the majority of operators (Req 4.1, Req 1.1).
-        logger.debug("no device profile declared, defaulting to %s", "rm2")
-        kwargs["device_profiles"] = [BUILTIN_PROFILES["rm2"]]
     return kwargs
 
 
-def _normalise_device_profiles(
-    cfg_path: Path, data: dict[str, Any]
-) -> list[DeviceProfile] | None:
-    """Normalise ``device_profile`` / ``device_profiles`` input into a list.
+def _validate_story_entry(where: str, index: int, story: Any) -> None:
+    """Validate a single ``stories[i]`` against the Stories Schema.
 
-    Returns ``None`` when neither key is present, signalling the caller to
-    apply the default (and emit the DEBUG log). Otherwise returns the fully
-    resolved list of :class:`DeviceProfile` instances. Raises
-    :class:`ConfigError` on type or validation failure; ``_resolve_profile``
-    (``profiles.resolve``) raises on unknown names / bad overrides, and this
-    function wraps those with the config file path plus the offending key
-    (Req 9.1 / 9.3 — operator must see both the file and the field).
+    Design reference: "Stories Schema (closed set, validated by
+    ``Config.load``)" in design.md. Required shape:
+
+    .. code-block:: json
+
+        {"provider": "rss",
+         "config": {"rss_path": "https://...", "limit": 5}}
+
+    Any other top-level key in the entry, any other key in ``config``, a
+    ``provider`` other than ``"rss"``, or a non-http(s) ``rss_path`` raises
+    :class:`ConfigError` naming both the file path and the offending key /
+    value. ``limit`` is optional but if present must be a positive ``int``
+    (``bool`` is rejected explicitly).
     """
-    if "device_profile" in data:
-        entry = data["device_profile"]
-        # Reject anything that is neither a string shorthand nor an object
-        # form *before* dispatching to _resolve_single, so the error message
-        # names the top-level input key rather than a synthetic index.
-        if not isinstance(entry, (str, dict)):
+    if not isinstance(story, dict):
+        raise ConfigError(
+            f"config field 'stories[{index}]' in {where}: expected object, "
+            f"got {type(story).__name__}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    # Top-level key set must be exactly {"provider", "config"}.
+    extra_top = set(story.keys()) - _STORY_TOP_KEYS
+    if extra_top:
+        bad = sorted(extra_top)[0]
+        raise ConfigError(
+            f"config field 'stories[{index}]' in {where}: unknown key {bad!r}; "
+            f"only 'provider' and 'config' are allowed",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+    missing_top = _STORY_TOP_KEYS - set(story.keys())
+    if missing_top:
+        bad = sorted(missing_top)[0]
+        raise ConfigError(
+            f"config field 'stories[{index}]' in {where}: missing required "
+            f"key {bad!r}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    provider = story["provider"]
+    if provider != "rss":
+        raise ConfigError(
+            f"config field 'stories[{index}].provider' in {where}: expected "
+            f"'rss', got {provider!r}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    cfg = story["config"]
+    if not isinstance(cfg, dict):
+        raise ConfigError(
+            f"config field 'stories[{index}].config' in {where}: expected "
+            f"object, got {type(cfg).__name__}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    extra_cfg = set(cfg.keys()) - _STORY_CONFIG_ALLOWED
+    if extra_cfg:
+        bad = sorted(extra_cfg)[0]
+        raise ConfigError(
+            f"config field 'stories[{index}].config' in {where}: unknown key "
+            f"{bad!r}; only {sorted(_STORY_CONFIG_ALLOWED)!r} are allowed",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+    missing_cfg = _STORY_CONFIG_REQUIRED - set(cfg.keys())
+    if missing_cfg:
+        bad = sorted(missing_cfg)[0]
+        raise ConfigError(
+            f"config field 'stories[{index}].config' in {where}: missing "
+            f"required key {bad!r}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    rss_path = cfg["rss_path"]
+    if not isinstance(rss_path, str) or not (
+        rss_path.startswith("http://") or rss_path.startswith("https://")
+    ):
+        raise ConfigError(
+            f"config field 'stories[{index}].config.rss_path' in {where}: "
+            f"expected an http:// or https:// URL string, got {rss_path!r}",
+            remediation=_STORIES_SCHEMA_REMEDIATION,
+        )
+
+    if "limit" in cfg:
+        limit = cfg["limit"]
+        # Reject bool first because bool is a subclass of int.
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ConfigError(
-                f"config field 'device_profile' in {cfg_path}: expected "
-                f"string or object, got {type(entry).__name__} ({entry!r})",
+                f"config field 'stories[{index}].config.limit' in {where}: "
+                f"expected a positive integer, got {limit!r}",
+                remediation=_STORIES_SCHEMA_REMEDIATION,
             )
-        resolved = [_resolve_single(cfg_path, "device_profile", entry)]
-        _check_no_duplicate_profiles(cfg_path, resolved)
-        return resolved
-    if "device_profiles" in data:
-        raw = data["device_profiles"]
-        if not isinstance(raw, list):
-            raise ConfigError(
-                f"config field 'device_profiles' in {cfg_path}: expected list, "
-                f"got {type(raw).__name__} ({raw!r})",
-            )
-        resolved = [
-            _resolve_single(cfg_path, f"device_profiles[{i}]", entry)
-            for i, entry in enumerate(raw)
-        ]
-        _check_no_duplicate_profiles(cfg_path, resolved)
-        return resolved
-    return None
-
-
-def _resolve_single(cfg_path: Path, where: str, entry: Any) -> DeviceProfile:
-    """Resolve a single profile entry (string shorthand or object form).
-
-    ``profiles.resolve`` raises :class:`ConfigError` with its own message on
-    unknown names / bad overrides. We catch and re-raise with the config file
-    path and the offending key prepended, because the operator needs both
-    pieces of context to locate and fix the mistake (Req 9.1 / 9.3).
-    """
-    if isinstance(entry, str):
-        try:
-            return _resolve_profile(entry)
-        except ConfigError as exc:
-            raise ConfigError(
-                f"config field {where!r} in {cfg_path}: {exc.message}",
-                remediation=exc.remediation,
-            ) from exc
-    if isinstance(entry, dict):
-        if "name" not in entry:
-            raise ConfigError(
-                f"config field {where!r} in {cfg_path}: profile object must "
-                f"include a 'name' key; got keys {sorted(entry)!r}",
-            )
-        name = entry["name"]
-        if not isinstance(name, str):
-            raise ConfigError(
-                f"config field {where!r} in {cfg_path}: profile 'name' must "
-                f"be a string; got {type(name).__name__} ({name!r})",
-            )
-        overrides = {k: v for k, v in entry.items() if k != "name"}
-        try:
-            return _resolve_profile(name, overrides or None)
-        except ConfigError as exc:
-            raise ConfigError(
-                f"config field {where!r} in {cfg_path}: {exc.message}",
-                remediation=exc.remediation,
-            ) from exc
-    raise ConfigError(
-        f"config field {where!r} in {cfg_path}: expected string or object, "
-        f"got {type(entry).__name__} ({entry!r})",
-    )
-
-
-def _check_no_duplicate_profiles(
-    cfg_path: Path, resolved: list[DeviceProfile]
-) -> None:
-    """Reject ``device_profiles`` lists that contain the same name twice.
-
-    Duplicates would cause the CLI loop to build and upload the same PDF
-    twice (different tmpdir, same content, same filename, same cloud
-    folder), which is never what the operator intended. Req 9.2.
-    """
-    seen: set[str] = set()
-    for p in resolved:
-        if p.name in seen:
-            raise ConfigError(
-                f"config field 'device_profiles' in {cfg_path}: duplicate "
-                f"profile name {p.name!r}; each profile may appear at most once",
-                remediation=(
-                    "remove the duplicate entry, or override a different "
-                    "built-in profile"
-                ),
-            )
-        seen.add(p.name)

@@ -1,8 +1,9 @@
 """Click-based CLI for renewsable.
 
-Design reference: the "cli (summary-only)" section in
-``.kiro/specs/daily-paper/design.md`` plus each orchestration component's
-"Service Interface" block (Config, Builder, Uploader, Scheduler, Pairing).
+Design reference: the "cli (modified)" subsection in
+``.kiro/specs/epub-output/design.md`` (Components section) plus each
+orchestration component's "Service Interface" block (Config, Builder,
+Uploader, Scheduler, Pairing).
 
 Requirements covered:
 - 1.1  Config read from the default path OR the explicit ``--config`` argument.
@@ -12,12 +13,14 @@ Requirements covered:
 - 4.5  On ``BuildError`` from ``run``, ``Uploader.upload`` is never invoked.
 - 6.5  ``test-pipeline`` exercises the full build+upload pipeline on demand
   (verbose by default).
+- 7.1  Build produces exactly one EPUB per run; no per-profile loop.
+- 8.1  ``run`` uploads the produced EPUB after a successful build.
 - 10.1 All required subcommands (``build``, ``upload``, ``run``,
   ``install-schedule``, ``uninstall-schedule``, ``pair``, ``test-pipeline``)
   are exposed.
 - 10.2 ``--help`` prints a usage summary for every command.
 - 10.3 ``upload PATH`` uploads an explicit file without rebuilding; bare
-  ``upload`` uploads today's built PDF.
+  ``upload`` uploads today's built EPUB.
 - 10.4 Success -> exit code 0.
 - 10.5 Failure -> non-zero exit with a human-readable message on stderr.
 
@@ -187,15 +190,15 @@ def _run_with_error_translation(
         ctx.exit(1)
 
 
-def _todays_pdf_path(config: Config) -> Path:
-    """Absolute path to ``<output_dir>/renewsable-<today>.pdf``.
+def _todays_epub_path(config: Config) -> Path:
+    """Absolute path to ``<output_dir>/renewsable-<today>.epub``.
 
     Uses the module-level ``datetime`` alias so tests can monkeypatch
     ``cli.datetime.date`` to pin "today" without mocking the stdlib
     globally.
     """
     today = datetime.date.today()
-    return config.output_dir / f"renewsable-{today.isoformat()}.pdf"
+    return config.output_dir / f"renewsable-{today.isoformat()}.epub"
 
 
 def _exe_path() -> Path:
@@ -219,26 +222,24 @@ def _exe_path() -> Path:
 @main.command()
 @click.pass_context
 def build(ctx: click.Context) -> None:
-    """Build today's PDF from the configured feeds.
+    """Build today's EPUB from the configured feeds.
 
-    Iterates over ``config.device_profiles`` and prints the absolute path
-    to each produced file on stdout so scripts can pipe it into another
-    command. If any profile fails, its error is logged and written to
-    stderr and the command exits 1 after attempting every profile;
-    otherwise exits 0.
+    Produces exactly one EPUB at ``<output_dir>/renewsable-<YYYY-MM-DD>.epub``
+    and prints the absolute path on stdout so scripts can pipe it into
+    another command. Exits 0 on success, 1 on ``BuildError``, 2 on
+    ``ConfigError``.
     """
     config = _bootstrap(ctx)
 
-    any_failed = False
-    for profile in config.device_profiles:
-        try:
-            pdf_path = Builder(config).build(profile)
-            click.echo(str(pdf_path))
-        except RenewsableError as exc:
-            any_failed = True
-            logger.error("profile %s failed: %s", profile.name, exc)
-            click.echo(str(exc), err=True)
-    if any_failed:
+    try:
+        epub_path = Builder(config).build()
+        click.echo(str(epub_path))
+    except ConfigError as exc:
+        click.echo(str(exc), err=True)
+        ctx.exit(2)
+    except RenewsableError as exc:
+        logger.error("build failed: %s", exc)
+        click.echo(str(exc), err=True)
         ctx.exit(1)
 
 
@@ -250,16 +251,16 @@ def build(ctx: click.Context) -> None:
 )
 @click.pass_context
 def upload(ctx: click.Context, path: Path | None) -> None:
-    """Upload a PDF to the configured reMarkable folder.
+    """Upload an EPUB to the configured reMarkable folder.
 
-    With no PATH argument, uploads today's built PDF
-    (``<output_dir>/renewsable-<YYYY-MM-DD>.pdf``). With an explicit PATH,
+    With no PATH argument, uploads today's built EPUB
+    (``<output_dir>/renewsable-<YYYY-MM-DD>.epub``). With an explicit PATH,
     uploads that file without rebuilding (Req 10.3). Either way, the
     destination folder is taken from ``config.remarkable_folder``.
     """
     config = _bootstrap(ctx)
 
-    target = path if path is not None else _todays_pdf_path(config)
+    target = path if path is not None else _todays_epub_path(config)
 
     def _do() -> None:
         Uploader(config).upload(target)
@@ -270,29 +271,27 @@ def upload(ctx: click.Context, path: Path | None) -> None:
 @main.command()
 @click.pass_context
 def run(ctx: click.Context) -> None:
-    """Build today's PDF and then upload it, per configured profile.
+    """Build today's EPUB and then upload it.
 
-    This is the command the scheduled systemd timer invokes. For each
-    profile in ``config.device_profiles`` it sequences
-    ``Builder.build(profile)`` followed by ``Uploader.upload(pdf,
-    folder=...)``. A profile's upload step is skipped when its own build
-    raised, but the next profile is still attempted (Req 6.3). The
-    command exits 1 if any profile failed, 0 otherwise.
+    This is the command the scheduled systemd timer invokes. It calls
+    ``Builder(config).build()`` once, then
+    ``Uploader(config).upload(epub_path, folder=config.remarkable_folder)``.
+    If the build raises, the upload is skipped (Req 4.5/8.1). Exits 0 on
+    success, 1 on any ``RenewsableError`` other than ``ConfigError``,
+    2 on ``ConfigError``.
     """
     config = _bootstrap(ctx)
 
-    any_failed = False
-    for profile in config.device_profiles:
-        try:
-            pdf = Builder(config).build(profile)
-            click.echo(str(pdf))
-            folder = profile.remarkable_folder or config.remarkable_folder
-            Uploader(config).upload(pdf, folder=folder)
-        except RenewsableError as exc:
-            any_failed = True
-            logger.error("profile %s failed: %s", profile.name, exc)
-            click.echo(str(exc), err=True)
-    if any_failed:
+    try:
+        epub_path = Builder(config).build()
+        click.echo(str(epub_path))
+        Uploader(config).upload(epub_path, folder=config.remarkable_folder)
+    except ConfigError as exc:
+        click.echo(str(exc), err=True)
+        ctx.exit(2)
+    except RenewsableError as exc:
+        logger.error("run failed: %s", exc)
+        click.echo(str(exc), err=True)
         ctx.exit(1)
 
 
@@ -369,9 +368,9 @@ def test_pipeline(ctx: click.Context) -> None:
     Exists so the operator can confirm an end-to-end run on demand
     without waiting for the scheduled fire time (Req 6.5). Raises the
     effective log level to at least INFO so operational breadcrumbs
-    (per-feed fetches, goosepaper invocation, rmapi calls) are visible
-    even if the caller set ``--log-level WARNING``; leaves DEBUG alone if
-    the caller asked for it explicitly.
+    (per-feed fetches, EPUB assembly, rmapi calls) are visible even if
+    the caller set ``--log-level WARNING``; leaves DEBUG alone if the
+    caller asked for it explicitly.
     """
     # Nudge WARNING/ERROR up to INFO so the run is loud (Req 6.5). If the
     # caller already asked for DEBUG (even more verbose) we leave that
@@ -380,17 +379,15 @@ def test_pipeline(ctx: click.Context) -> None:
         ctx.obj["log_level"] = "INFO"
     config = _bootstrap(ctx)
 
-    any_failed = False
-    for profile in config.device_profiles:
-        try:
-            pdf = Builder(config).build(profile)
-            click.echo(f"built {pdf}")
-            folder = profile.remarkable_folder or config.remarkable_folder
-            Uploader(config).upload(pdf, folder=folder)
-            click.echo("uploaded successfully")
-        except RenewsableError as exc:
-            any_failed = True
-            logger.error("profile %s failed: %s", profile.name, exc)
-            click.echo(str(exc), err=True)
-    if any_failed:
+    try:
+        epub_path = Builder(config).build()
+        click.echo(f"built {epub_path}")
+        Uploader(config).upload(epub_path, folder=config.remarkable_folder)
+        click.echo("uploaded successfully")
+    except ConfigError as exc:
+        click.echo(str(exc), err=True)
+        ctx.exit(2)
+    except RenewsableError as exc:
+        logger.error("test-pipeline failed: %s", exc)
+        click.echo(str(exc), err=True)
         ctx.exit(1)

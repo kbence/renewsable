@@ -48,7 +48,7 @@
 
 - [ ] 3. Integration: trim Config, rewrite Builder, collapse CLI, delete profiles
 
-- [ ] 3.1 Trim Config and add Stories Schema validation
+- [x] 3.1 Trim Config and add Stories Schema validation
   - Remove the dataclass fields `goosepaper_bin`, `font_size`, `subprocess_timeout_s`, `device_profiles` and the input-only keys `device_profile`/`device_profiles` from the closed-set check; remove `_normalise_device_profiles`, `_resolve_single`, `_check_no_duplicate_profiles`, and the `from .profiles import …` import.
   - Drop the matching entries from `_TYPE_RULES` and `_apply_defaults`. Update default `goosepaper_bin`/`subprocess_timeout_s`/`font_size` removal so `Config.load` no longer accepts these keys.
   - Add Stories Schema validation in `Config.validate`: for each `stories[i]`, require keys exactly `{"provider", "config"}`; require `provider == "rss"`; require `config.rss_path` to be a non-empty `http://` or `https://` string; allow optional `config.limit` (positive int); reject any other key in the entry or in `entry.config` with a `ConfigError` naming both the file path and the offending key, with a remediation pointing the operator at the schema.
@@ -57,7 +57,7 @@
   - _Requirements: 2.4_
   - _Boundary: Config_
 
-- [ ] 3.2 Rewrite Builder around the new pipeline
+- [x] 3.2 Rewrite Builder around the new pipeline
   - Change `Builder.build` to `build(today: date | None = None) -> Path` (drop the `profile` parameter and the `DeviceProfile` import).
   - Compute `output_path = config.output_dir / f"renewsable-{today.isoformat()}.epub"`.
   - Replace `_prepare_stories`, `_write_goosepaper_config`, `_run_goosepaper`, `_validate_pdf`, and the per-profile CSS write with: (a) initialize per-run robots cache, (b) call `articles.collect(...)`, (c) raise `BuildError` if zero articles produced (with a remediation pointing at the per-source logs), (d) call `epub.assemble(...)`, (e) call `_validate_epub(output_path)`.
@@ -69,7 +69,7 @@
   - _Boundary: Builder_
   - _Depends: 1.2, 2.1, 2.2, 3.1_
 
-- [ ] 3.3 Collapse the CLI multi-profile loop
+- [x] 3.3 Collapse the CLI multi-profile loop
   - Remove the `for profile in config.device_profiles:` loops in `build`, `run`, and `test-pipeline`. Each command now invokes `Builder(config).build()` exactly once.
   - For `run` and `test-pipeline`, the upload call becomes `Uploader(config).upload(epub_path, folder=config.remarkable_folder)`.
   - Rename `_todays_pdf_path` to `_todays_epub_path` returning `<output_dir>/renewsable-<YYYY-MM-DD>.epub`. Update the bare `upload` command to use the new helper.
@@ -80,7 +80,7 @@
   - _Boundary: cli_
   - _Depends: 3.2_
 
-- [ ] 3.4 Delete the device-profile module and its tests
+- [x] 3.4 Delete the device-profile module and its tests
   - Remove `src/renewsable/profiles.py` and `tests/test_profiles.py`.
   - Verify no other module still imports `DeviceProfile`, `BUILTIN_PROFILES`, `resolve`, or `render_css` (Config and Builder were updated in 3.1 and 3.2).
   - Observable completion: `grep -r "from renewsable.profiles\|import profiles\|DeviceProfile\|BUILTIN_PROFILES\|render_css" src/ tests/` returns no matches; `pytest` collection succeeds with no `ModuleNotFoundError`.

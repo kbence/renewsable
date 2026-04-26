@@ -1,15 +1,18 @@
 """Unit tests for :mod:`renewsable.cli`.
 
-Design reference: the "cli (summary-only)" section of
-``.kiro/specs/daily-paper/design.md`` plus each orchestration component's
+Design reference: the "cli (modified)" subsection of
+``.kiro/specs/epub-output/design.md`` plus each orchestration component's
 "Service Interface" block (Config, Builder, Uploader, Scheduler, Pairing).
 
 Requirements covered:
 - 1.1  Config read from default path or explicit ``--config``.
 - 1.3  Missing config -> exit-2 error that names the expected path.
-- 4.1  ``run`` uploads the built PDF after a successful build.
+- 4.1  ``run`` uploads the built EPUB after a successful build.
 - 4.5  No upload if the preceding build failed (short-circuit on ``BuildError``).
 - 6.5  ``test-pipeline`` command exercises build+upload on demand.
+- 7.1  Build produces exactly one EPUB per run; no per-profile loop.
+- 8.1  ``run`` uploads after a successful build, with
+       ``folder=config.remarkable_folder``.
 - 10.1 All required subcommands exist.
 - 10.2 Each command has ``--help`` printing a usage summary.
 - 10.3 ``upload`` with an explicit path skips Builder and uploads that file.
@@ -27,7 +30,6 @@ real subprocess, open a network socket, or touch the real
 from __future__ import annotations
 
 import datetime as _dt
-import json
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +49,6 @@ from renewsable.errors import (
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 VALID_CONFIG = FIXTURE_DIR / "config.valid.json"
-PROFILES_LIST_CONFIG = FIXTURE_DIR / "config.profiles_list.json"
 
 
 # ---------------------------------------------------------------------------
@@ -95,18 +96,10 @@ def _install_fakes(
         def __init__(self, config: Any) -> None:
             rec.record("Builder.__init__", config)
 
-        def build(self, profile: Any = None, today: Any = None) -> Path:
-            rec.record("Builder.build", profile, today=today)
+        def build(self, today: Any = None) -> Path:
+            rec.record("Builder.build", today=today)
             if build_raises is not None:
-                # Support per-call raising via a list of (exc_or_None).
-                if isinstance(build_raises, list):
-                    exc = build_raises.pop(0)
-                    if exc is not None:
-                        raise exc
-                else:
-                    raise build_raises
-            if isinstance(build_result, list):
-                return build_result.pop(0)
+                raise build_raises
             assert build_result is not None, "test must provide build_result"
             return build_result
 
@@ -114,8 +107,8 @@ def _install_fakes(
         def __init__(self, config: Any) -> None:
             rec.record("Uploader.__init__", config)
 
-        def upload(self, pdf: Path, folder: str | None = None) -> None:
-            rec.record("Uploader.upload", pdf, folder=folder)
+        def upload(self, epub: Path, folder: str | None = None) -> None:
+            rec.record("Uploader.upload", epub, folder=folder)
             if upload_raises is not None:
                 raise upload_raises
 
@@ -236,26 +229,30 @@ def test_missing_default_config_exits_2(
 
 
 # ---------------------------------------------------------------------------
-# build command (Req 10.4, 10.5)
+# build command (Req 7.1, 10.4, 10.5)
 # ---------------------------------------------------------------------------
 
 
-def test_build_success_invokes_builder_and_prints_path(
+def test_build_invokes_builder_exactly_once_and_prints_path(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
     recorder: _Recorder,
     isolated_xdg: Path,
     tmp_path: Path,
 ) -> None:
-    produced = tmp_path / "renewsable-2026-04-19.pdf"
+    produced = tmp_path / "renewsable-2026-04-19.epub"
     _install_fakes(monkeypatch, recorder, build_result=produced)
 
     result = runner.invoke(main, ["--config", str(VALID_CONFIG), "build"])
 
     assert result.exit_code == 0, (result.output, result.stderr)
-    assert "Builder.build" in recorder.names()
+    # Builder.build called exactly once — Req 7.1, no per-profile loop.
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    assert len(build_calls) == 1
     # The built path should be echoed so shell scripts can pick it up.
     assert str(produced) in result.output
+    # build does not invoke Uploader.
+    assert "Uploader.upload" not in recorder.names()
 
 
 def test_build_build_error_exits_1_with_stderr(
@@ -274,6 +271,15 @@ def test_build_build_error_exits_1_with_stderr(
     assert "no feeds produced content" in result.stderr
 
 
+def test_build_config_error_exits_2(
+    runner: CliRunner, tmp_path: Path, isolated_xdg: Path
+) -> None:
+    """A missing config file produces exit code 2, distinct from BuildError's 1."""
+    bogus = tmp_path / "missing.json"
+    result = runner.invoke(main, ["--config", str(bogus), "build"])
+    assert result.exit_code == 2
+
+
 # ---------------------------------------------------------------------------
 # upload command (Req 10.3)
 # ---------------------------------------------------------------------------
@@ -286,7 +292,7 @@ def test_upload_with_explicit_path_skips_builder(
     isolated_xdg: Path,
     tmp_path: Path,
 ) -> None:
-    explicit = tmp_path / "arbitrary.pdf"
+    explicit = tmp_path / "arbitrary.epub"
     _install_fakes(monkeypatch, recorder)
     result = runner.invoke(
         main, ["--config", str(VALID_CONFIG), "upload", str(explicit)]
@@ -299,7 +305,7 @@ def test_upload_with_explicit_path_skips_builder(
     assert Path(str(upload_calls[0][1][0])) == explicit
 
 
-def test_upload_without_path_uses_todays_pdf(
+def test_upload_without_path_uses_todays_epub(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
     recorder: _Recorder,
@@ -321,9 +327,10 @@ def test_upload_without_path_uses_todays_pdf(
     assert result.exit_code == 0, (result.output, result.stderr)
     upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
     assert len(upload_calls) == 1
-    # Filename follows the renewsable-<YYYY-MM-DD>.pdf contract.
+    # Filename follows the renewsable-<YYYY-MM-DD>.epub contract (Req 7.2).
     uploaded_path = Path(str(upload_calls[0][1][0]))
-    assert uploaded_path.name == "renewsable-2026-04-19.pdf"
+    assert uploaded_path.suffix == ".epub"
+    assert uploaded_path.name == "renewsable-2026-04-19.epub"
     # Parent directory is the configured output_dir (from the valid fixture).
     assert uploaded_path.parent.name == "out"
 
@@ -342,7 +349,7 @@ def test_upload_upload_error_exits_1_with_stderr(
             "rmapi put failed", remediation="run `renewsable pair`"
         ),
     )
-    explicit = tmp_path / "x.pdf"
+    explicit = tmp_path / "x.epub"
     result = runner.invoke(
         main, ["--config", str(VALID_CONFIG), "upload", str(explicit)]
     )
@@ -351,32 +358,37 @@ def test_upload_upload_error_exits_1_with_stderr(
 
 
 # ---------------------------------------------------------------------------
-# run command: sequencing + short-circuit (Req 4.1, 4.5)
+# run command: sequencing + short-circuit (Req 4.1, 4.5, 8.1)
 # ---------------------------------------------------------------------------
 
 
-def test_run_sequences_build_then_upload(
+def test_run_sequences_build_then_upload_with_configured_folder(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
     recorder: _Recorder,
     isolated_xdg: Path,
     tmp_path: Path,
 ) -> None:
-    produced = tmp_path / "renewsable-2026-04-19.pdf"
+    produced = tmp_path / "renewsable-2026-04-19.epub"
     _install_fakes(monkeypatch, recorder, build_result=produced)
 
     result = runner.invoke(main, ["--config", str(VALID_CONFIG), "run"])
     assert result.exit_code == 0, (result.output, result.stderr)
 
+    # Builder.build called exactly once (Req 7.1) and Uploader.upload once.
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    assert len(build_calls) == 1
+    assert len(upload_calls) == 1
+
     # Order matters: Builder.build must precede Uploader.upload.
     names = recorder.names()
-    b_idx = names.index("Builder.build")
-    u_idx = names.index("Uploader.upload")
-    assert b_idx < u_idx
+    assert names.index("Builder.build") < names.index("Uploader.upload")
 
-    # The upload target is the path Builder returned.
-    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    # The upload target is the path Builder returned, and the folder is
+    # config.remarkable_folder (Req 8.1). The valid fixture sets it to "/News".
     assert Path(str(upload_calls[0][1][0])) == produced
+    assert upload_calls[0][2]["folder"] == "/News"
 
 
 def test_run_short_circuits_on_build_error(
@@ -499,166 +511,35 @@ def test_pair_pairing_error_exits_1(
 
 
 # ---------------------------------------------------------------------------
-# test-pipeline command (Req 6.5)
+# test-pipeline command (Req 6.5, 7.1, 8.1)
 # ---------------------------------------------------------------------------
 
 
-def test_test_pipeline_runs_build_then_upload(
+def test_test_pipeline_runs_build_then_upload_once(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
     recorder: _Recorder,
     isolated_xdg: Path,
     tmp_path: Path,
 ) -> None:
-    produced = tmp_path / "renewsable-2026-04-19.pdf"
+    produced = tmp_path / "renewsable-2026-04-19.epub"
     _install_fakes(monkeypatch, recorder, build_result=produced)
     result = runner.invoke(
         main, ["--config", str(VALID_CONFIG), "test-pipeline"]
     )
     assert result.exit_code == 0, (result.output, result.stderr)
+    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
+    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
+    assert len(build_calls) == 1
+    assert len(upload_calls) == 1
     names = recorder.names()
-    assert "Builder.build" in names
-    assert "Uploader.upload" in names
     assert names.index("Builder.build") < names.index("Uploader.upload")
-
-
-# ---------------------------------------------------------------------------
-# Multi-profile iteration (Task 4.1; Req 6.1, 6.3, 7.1, 7.2)
-# ---------------------------------------------------------------------------
-
-
-def test_build_iterates_profiles(
-    runner: CliRunner,
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    isolated_xdg: Path,
-    tmp_path: Path,
-) -> None:
-    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
-    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
-    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
-
-    result = runner.invoke(
-        main, ["--config", str(PROFILES_LIST_CONFIG), "build"]
-    )
-    assert result.exit_code == 0, (result.output, result.stderr)
-
-    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
-    assert len(build_calls) == 2
-    # First positional arg is the profile; names come from the fixture.
-    assert build_calls[0][1][0].name == "rm2"
-    assert build_calls[1][1][0].name == "paper_pro_move"
-    # Both PDF paths are printed on stdout.
-    assert str(pdf_rm2) in result.output
-    assert str(pdf_ppm) in result.output
-    # build does not invoke Uploader.
-    assert "Uploader.upload" not in recorder.names()
-
-
-def test_run_iterates_profiles_with_distinct_folders(
-    runner: CliRunner,
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    isolated_xdg: Path,
-    tmp_path: Path,
-) -> None:
-    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
-    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
-    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
-
-    result = runner.invoke(
-        main, ["--config", str(PROFILES_LIST_CONFIG), "run"]
-    )
-    assert result.exit_code == 0, (result.output, result.stderr)
-
-    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
-    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
-    assert len(build_calls) == 2
-    assert len(upload_calls) == 2
-
-    # First profile (rm2) inherits config.remarkable_folder ("/News").
-    assert Path(str(upload_calls[0][1][0])) == pdf_rm2
+    # The upload target is the path Builder returned, folder from config.
+    assert Path(str(upload_calls[0][1][0])) == produced
     assert upload_calls[0][2]["folder"] == "/News"
-    # Second profile (paper_pro_move) overrides to "/News-Move".
-    assert Path(str(upload_calls[1][1][0])) == pdf_ppm
-    assert upload_calls[1][2]["folder"] == "/News-Move"
-
-
-def test_run_partial_failure_continues_and_exits_1(
-    runner: CliRunner,
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    isolated_xdg: Path,
-    tmp_path: Path,
-) -> None:
-    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
-    _install_fakes(
-        monkeypatch,
-        recorder,
-        build_result=[pdf_ppm],
-        build_raises=[BuildError("rm2 feed failed"), None],
-    )
-
-    result = runner.invoke(
-        main, ["--config", str(PROFILES_LIST_CONFIG), "run"]
-    )
-    assert result.exit_code == 1, (result.output, result.stderr)
-
-    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
-    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
-    # Both profiles were attempted; second profile's upload still ran.
-    assert len(build_calls) == 2
-    assert len(upload_calls) == 1
-    assert Path(str(upload_calls[0][1][0])) == pdf_ppm
-    assert upload_calls[0][2]["folder"] == "/News-Move"
-
-    # The first-profile failure is on stderr.
-    assert "rm2 feed failed" in result.stderr
-
-
-def test_test_pipeline_iterates_profiles(
-    runner: CliRunner,
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    isolated_xdg: Path,
-    tmp_path: Path,
-) -> None:
-    pdf_rm2 = tmp_path / "renewsable-2026-04-19-rm2.pdf"
-    pdf_ppm = tmp_path / "renewsable-2026-04-19-paper_pro_move.pdf"
-    _install_fakes(monkeypatch, recorder, build_result=[pdf_rm2, pdf_ppm])
-
-    result = runner.invoke(
-        main, ["--config", str(PROFILES_LIST_CONFIG), "test-pipeline"]
-    )
-    assert result.exit_code == 0, (result.output, result.stderr)
-
-    build_calls = [c for c in recorder.calls if c[0] == "Builder.build"]
-    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
-    assert len(build_calls) == 2
-    assert len(upload_calls) == 2
-    assert upload_calls[0][2]["folder"] == "/News"
-    assert upload_calls[1][2]["folder"] == "/News-Move"
-
-
-def test_upload_with_explicit_path_unchanged_multi_profile(
-    runner: CliRunner,
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    isolated_xdg: Path,
-    tmp_path: Path,
-) -> None:
-    """Explicit-path upload never fans out over profiles."""
-    explicit = tmp_path / "x.pdf"
-    _install_fakes(monkeypatch, recorder)
-    result = runner.invoke(
-        main,
-        ["--config", str(PROFILES_LIST_CONFIG), "upload", str(explicit)],
-    )
-    assert result.exit_code == 0, (result.output, result.stderr)
-    assert "Builder.build" not in recorder.names()
-    upload_calls = [c for c in recorder.calls if c[0] == "Uploader.upload"]
-    assert len(upload_calls) == 1
-    assert Path(str(upload_calls[0][1][0])) == explicit
+    # Verbose breadcrumbs visible on stdout.
+    assert f"built {produced}" in result.output
+    assert "uploaded successfully" in result.output
 
 
 # ---------------------------------------------------------------------------

@@ -54,7 +54,6 @@ def _make_config(
     rmapi_bin: str = "rmapi",
     upload_retries: int = 3,
     upload_backoff_s: float = 2.0,
-    subprocess_timeout_s: int = 180,
 ) -> Config:
     """Build a valid Config by hand (no JSON round-trip)."""
     return Config(
@@ -65,7 +64,6 @@ def _make_config(
         rmapi_bin=rmapi_bin,
         upload_retries=upload_retries,
         upload_backoff_s=upload_backoff_s,
-        subprocess_timeout_s=subprocess_timeout_s,
     )
 
 
@@ -148,16 +146,17 @@ def test_upload_happy_path_mkdir_then_put(tmp_path, monkeypatch):
     assert sleep_spy.durations == []
 
 
-def test_upload_passes_timeout_and_capture_kwargs(tmp_path, monkeypatch):
-    """The subprocess invocations must be bounded by subprocess_timeout_s
+def test_subprocess_invocations_bounded_by_rmapi_timeout_constant(tmp_path, monkeypatch):
+    """The subprocess invocations must be bounded by ``_RMAPI_TIMEOUT_S``
     and capture stdio so stderr can be classified.
     """
     pdf = _make_pdf(tmp_path)
     script = _ScriptedRun([(0, ""), (0, "")])
     monkeypatch.setattr(uploader_mod.subprocess, "run", script)
     monkeypatch.setattr(uploader_mod._time, "sleep", _SleepSpy())
+    monkeypatch.setattr(uploader_mod, "_RMAPI_TIMEOUT_S", 42)
 
-    cfg = _make_config(tmp_path, subprocess_timeout_s=42)
+    cfg = _make_config(tmp_path)
     Uploader(cfg).upload(pdf)
 
     for _argv, kwargs in script.calls:
@@ -537,7 +536,7 @@ def test_put_timeout_raises_upload_error(tmp_path, monkeypatch):
         calls.append(list(argv))
         if argv[1] == "mkdir":
             return SimpleNamespace(returncode=0, stdout="", stderr="")
-        # put: simulate a hang that exceeds subprocess_timeout_s.
+        # put: simulate a hang that exceeds _RMAPI_TIMEOUT_S.
         raise real_subprocess.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout", 0))
 
     monkeypatch.setattr(uploader_mod.subprocess, "run", run)

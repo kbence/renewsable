@@ -17,10 +17,11 @@ Requirements covered:
 - 8.4 The failure message identifies folder, local PDF path, and reason.
 - 9.3 Bounded retries with exponential backoff between attempts
   (``config.upload_retries`` total, base ``config.upload_backoff_s``).
-- 9.5 No hang / partial upload: every subprocess is bounded by
-  ``config.subprocess_timeout_s``; timeouts raise ``UploadError`` without
-  retrying. Token failures raise on first attempt. A successful run
-  leaves exactly the current ``pdf.name`` in the folder (``--force``).
+- 9.5 No hang / partial upload: every subprocess is bounded by the
+  module-level ``_RMAPI_TIMEOUT_S`` constant; timeouts raise
+  ``UploadError`` without retrying. Token failures raise on first
+  attempt. A successful run leaves exactly the current ``pdf.name`` in
+  the folder (``--force``).
 
 Shape
 -----
@@ -84,6 +85,14 @@ __all__ = ["Uploader"]
 
 
 logger = logging.getLogger(__name__)
+
+
+# Bound on a single rmapi subprocess call (mkdir or put). Long enough to
+# tolerate slow uploads to the reMarkable cloud, short enough that a hung
+# process does not delay a scheduled run indefinitely. Was previously
+# config.subprocess_timeout_s; renewsable's only remaining subprocess is
+# rmapi, so the timeout lives with the Uploader rather than in Config.
+_RMAPI_TIMEOUT_S: int = 180
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +206,7 @@ class Uploader:
               attempts.
             * ``rmapi put`` reported a token-class error on any attempt
               (not retried; remediation points at ``renewsable pair``).
-            * A subprocess call exceeded ``config.subprocess_timeout_s``.
+            * A subprocess call exceeded ``_RMAPI_TIMEOUT_S``.
 
         On any raised ``UploadError`` the local PDF is left in place
         (Req 4.4); the caller may re-run later.
@@ -236,15 +245,15 @@ class Uploader:
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=cfg.subprocess_timeout_s,
+                timeout=_RMAPI_TIMEOUT_S,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
             raise UploadError(
-                f"rmapi mkdir {folder} timed out after {cfg.subprocess_timeout_s}s",
+                f"rmapi mkdir {folder} timed out after {_RMAPI_TIMEOUT_S}s",
                 remediation=(
-                    "check network connectivity and raise 'subprocess_timeout_s' "
-                    "in config if the reMarkable cloud is simply slow right now"
+                    "investigate a hung rmapi process or persistent reMarkable "
+                    "cloud slowness"
                 ),
             ) from exc
         except FileNotFoundError as exc:
@@ -315,7 +324,7 @@ class Uploader:
                     argv,
                     capture_output=True,
                     text=True,
-                    timeout=cfg.subprocess_timeout_s,
+                    timeout=_RMAPI_TIMEOUT_S,
                     check=False,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -325,10 +334,10 @@ class Uploader:
                 # it immediately rather than looping.
                 raise UploadError(
                     f"rmapi put {pdf} -> {folder} timed out after "
-                    f"{cfg.subprocess_timeout_s}s",
+                    f"{_RMAPI_TIMEOUT_S}s",
                     remediation=(
-                        "check network connectivity and raise "
-                        "'subprocess_timeout_s' in config if the cloud is slow"
+                        "investigate a hung rmapi process or persistent "
+                        "reMarkable cloud slowness"
                     ),
                 ) from exc
             except FileNotFoundError as exc:
