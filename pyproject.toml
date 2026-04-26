@@ -9,7 +9,12 @@ description = "Daily news digest EPUB pipeline for reMarkable 2, scheduled on a 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "bnc" }]
+authors = [{ name = "Bence Kiglics" }]
+
+[project.urls]
+Homepage = "https://github.com/kbence/renewsable"
+Repository = "https://github.com/kbence/renewsable"
+Issues = "https://github.com/kbence/renewsable/issues"
 dependencies = [
     "click>=8.1",
     "ebooklib>=0.18",
