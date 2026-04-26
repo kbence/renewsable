@@ -20,7 +20,7 @@
 
 - [ ] 2. Core: article extraction and EPUB assembly
 
-- [ ] 2.1 (P) Implement the article-collection module
+- [x] 2.1 (P) Implement the article-collection module
   - Add an `articles` module exposing a frozen `Article` record (`title`, `html`, `source_url`) and a `collect(stories, *, ua, retries, backoff_s, robots_cache)` function.
   - For each `provider="rss"` story, fetch the feed via `http.fetch_with_retry`, parse with `feedparser`, and iterate entries (capping at the entry's `config.limit` when present).
   - For each entry, fetch the article URL via `http.fetch_with_retry` and extract the main body via `readability.Document(html).summary()`. On any failure, fall back to the entry's `summary`/`content`.
@@ -33,7 +33,7 @@
   - _Boundary: articles module_
   - _Depends: 1.1, 1.2_
 
-- [ ] 2.2 (P) Implement the EPUB assembly module
+- [x] 2.2 (P) Implement the EPUB assembly module
   - Add an `epub` module exposing `assemble(articles, *, today, output_path, ua, retries, backoff_s, image_timeout_s=15.0, image_max_bytes=10*1024*1024)`.
   - For each article, walk the HTML and for every `<img src>`: fetch the image via `http.fetch_with_retry`, determine MIME from the `Content-Type` header (URL extension as fallback), register an `EpubItem` under `EPUB/images/img-<sha256(url)[:12]>.<ext>`, rewrite `<img src>` to that internal path. On any image fetch failure or oversize, replace the `<img>` with `<span class="renewsable-missing-image" data-src="<url>">[image unavailable: <alt or url>]</span>` and continue. Image failures never raise.
   - Build the book with `ebooklib.epub.EpubBook()`: one `EpubHtml` chapter per article (uid `article-<NNN>`), spine `["nav", *chapters]`, `book.add_item(EpubNcx())`, `book.add_item(EpubNav())`.
