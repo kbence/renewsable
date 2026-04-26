@@ -1,16 +1,16 @@
 # renewsable
 
-A daily news digest for the reMarkable 2, delivered as a PDF every morning by a Raspberry Pi.
+A daily news digest for the reMarkable 2, delivered as an EPUB every morning by a Raspberry Pi.
 
-Pipeline: configurable RSS feeds → `goosepaper` (HTML + WeasyPrint PDF) → `rmapi` upload to your reMarkable cloud → `systemd` user timer schedules the daily run.
+Pipeline: configurable RSS feeds → in-process article extraction (`feedparser` + `readability-lxml`) → `ebooklib` EPUB assembly → `rmapi` upload to your reMarkable cloud → `systemd` user timer schedules the daily run.
 
 ## Status
 
 - Core pipeline (build + upload + scheduled run + pairing) is implemented and unit-tested.
 - Bootstrap script (`scripts/install-pi.sh`) provisions apt prerequisites, a project-local venv, and a pinned `rmapi` binary on Raspberry Pi OS Bookworm 64-bit.
 - Config loader, logging with credential redaction, per-feed retry/backoff, `systemd --user` timer install/uninstall, and end-to-end `test-pipeline` are all wired.
-- Rendering fidelity is whatever `goosepaper`'s default broadsheet template produces; custom CSS is out of scope.
-- EPUB output, cross-day deduplication, and any monitoring dashboard are explicit non-goals.
+- Rendering is a clean reflowable EPUB (one chapter per article, embedded images); device-specific page layout is delegated to the reMarkable EPUB reader.
+- Cross-day deduplication and any monitoring dashboard are explicit non-goals.
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ cd renewsable
 ./scripts/install-pi.sh
 ```
 
-This installs apt prerequisites for WeasyPrint (Pango, HarfBuzz, FFI, DejaVu + Noto Core fonts), creates a project-local venv at `.venv/`, installs `renewsable` in editable mode with dev extras (`pip install -e ".[dev]"`), and downloads the pinned `ddvk/rmapi` Linux arm64 release tarball with SHA-256 verification into `.venv/bin/rmapi`. It is idempotent: re-running it is safe.
+This creates a project-local venv at `.venv/`, installs `renewsable` in editable mode with dev extras (`pip install -e ".[dev]"`), and downloads the pinned `ddvk/rmapi` Linux arm64 release tarball with SHA-256 verification into `.venv/bin/rmapi`. It is idempotent: re-running it is safe.
 
 ### 3. Pair with your reMarkable cloud account
 
@@ -56,7 +56,7 @@ Open <https://my.remarkable.com/device/desktop/connect> in a browser that is log
 renewsable --config config/config.example.json test-pipeline
 ```
 
-This runs the full build + upload end-to-end against the shipped example config (six international feeds, `/News` folder on the tablet, 05:30 fire time). On success, a PDF appears at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.pdf` and in the `/News/` folder on your reMarkable.
+This runs the full build + upload end-to-end against the shipped example config (six international feeds, `/News` folder on the tablet, 05:30 fire time). On success, an EPUB appears at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.epub` and in the `/News/` folder on your reMarkable.
 
 ### 5. Customise the config (optional but recommended)
 
@@ -84,7 +84,7 @@ sudo loginctl enable-linger $USER
 
 Without this, the user-level `systemd` instance stops when your SSH session ends and the timer never fires. This step is manual because it requires `sudo` and is a one-time system-policy change — the bootstrap script refuses to touch it on your behalf.
 
-You are done. The Pi will build and upload a dated PDF every day at the configured time.
+You are done. The Pi will build and upload a dated EPUB every day at the configured time.
 
 ## Deployment workflow (macOS → Pi)
 
@@ -113,7 +113,7 @@ Notes:
 - `pip install -e .` is cheap when nothing changed; run it unconditionally after every pull to keep the editable install's metadata in sync (e.g. a new dependency added to `pyproject.toml`).
 - `renewsable install-schedule` is idempotent: re-running it overwrites the unit files and reloads `systemctl --user`. Re-running when nothing changed is a no-op you can treat as safe.
 - If you only edited feeds in your config, nothing further is needed — the next scheduled fire picks up the change (every `Config.load` is a fresh file read, no caching).
-- To roll back, `git checkout <ref>` on the Pi and re-run `pip install -e .`. The config, logs, and output PDFs live outside the repo under `~/.config/renewsable/` and `~/.local/state/renewsable/`.
+- To roll back, `git checkout <ref>` on the Pi and re-run `pip install -e .`. The config, logs, and output EPUBs live outside the repo under `~/.config/renewsable/` and `~/.local/state/renewsable/`.
 
 ## Configuration reference
 
@@ -123,72 +123,25 @@ The config is a single JSON object. Unknown top-level keys are rejected to catch
 |-------|------|----------|---------|-------------|
 | `schedule_time` | string `"HH:MM"` (24h) | yes | `"05:30"` (dataclass default; example config sets it explicitly) | Local wall-clock time when the daily build fires. |
 | `remarkable_folder` | string starting with `/` | yes | `"/News"` | Destination folder on the reMarkable cloud. |
-| `stories` | list of `{provider, config}` objects | yes | — (must be non-empty) | `goosepaper` story providers. `renewsable` validates only that it is a non-empty list of objects; per-provider shape is owned by `goosepaper`. |
-| `output_dir` | string path (supports `~`) | no | `$XDG_STATE_HOME/renewsable/out` (else `~/.local/state/renewsable/out`) | Where built PDFs are written locally. |
-| `font_size` | positive integer | no | `goosepaper` default | Forwarded to `goosepaper` when set. |
+| `stories` | list of `{provider, config}` objects | yes | — (must be non-empty) | RSS feed sources. Each entry is exactly `{"provider": "rss", "config": {"rss_path": "<http(s) URL>", "limit": <optional positive int>}}`. Unknown keys at either level are rejected. |
+| `output_dir` | string path (supports `~`) | no | `$XDG_STATE_HOME/renewsable/out` (else `~/.local/state/renewsable/out`) | Where built EPUBs are written locally. |
 | `log_dir` | string path (supports `~`) | no | `$XDG_STATE_HOME/renewsable/logs` (else `~/.local/state/renewsable/logs`) | Where the rotating plain-text log file lands. |
-| `user_agent` | string | no | `"renewsable/0.1 (+https://github.com/bnc/renewsable)"` | User-Agent sent on feed fetches. |
-| `goosepaper_bin` | string | no | `"goosepaper"` | Command name or absolute path to the `goosepaper` executable. |
+| `user_agent` | string | no | `"renewsable/0.1 (+https://github.com/bnc/renewsable)"` | User-Agent sent on feed and article fetches. |
 | `rmapi_bin` | string | no | `"rmapi"` | Command name or absolute path to the `rmapi` executable. Pi installs drop it at `.venv/bin/rmapi`. |
 | `feed_fetch_retries` | integer > 0 | no | `3` | Attempts per feed before giving up (the feed is then skipped). |
 | `feed_fetch_backoff_s` | number > 0 | no | `1.0` | Base seconds between feed-fetch retries. |
 | `upload_retries` | integer > 0 | no | `3` | Attempts per `rmapi` upload before raising `UploadError`. |
 | `upload_backoff_s` | number > 0 | no | `2.0` | Base seconds between upload retries. |
-| `subprocess_timeout_s` | integer > 0 | no | `180` | Hard timeout (seconds) for `goosepaper` and `rmapi` subprocess invocations. |
 
 The example at `config/config.example.json` is deliberately minimal: it sets only the required fields plus six pre-configured RSS feeds, and relies on defaults for everything else.
 
-### Device profiles
+### Output filename
 
-A **device profile** tunes the generated PDF's page size and colour behaviour for a specific reMarkable model. The profile is declared via one of three shapes in your config; omitting the key entirely keeps the pre-existing default (the `rm2` profile).
-
-Shorthand (single profile, built-in defaults):
-```json
-{ "device_profile": "paper_pro_move" }
-```
-
-Single profile with overrides (e.g. a distinct destination folder):
-```json
-{
-  "device_profile": {
-    "name": "paper_pro_move",
-    "remarkable_folder": "/News-Move"
-  }
-}
-```
-
-Multi-profile (produces one PDF per profile per run):
-```json
-{
-  "device_profiles": [
-    { "name": "rm2" },
-    { "name": "paper_pro_move", "remarkable_folder": "/News-Move" }
-  ]
-}
-```
-
-A config may declare `device_profile` OR `device_profiles`, not both.
-
-**Built-in profiles**
-
-| Name | Page dimensions (portrait) | Default margin | Default font size | Default colour |
-|------|----------------------------|----------------|--------------------|----------------|
-| `rm2` | 6.18in × 8.23in (≈10.3" screen) | 0.35in | 12pt | on (rm2 grayscales on device anyway; stays a colour PDF for byte-compat with pre-profile builds) |
-| `paper_pro_move` | 4.38in × 5.84in (≈7.3" screen) | 0.25in | 11pt | on (Paper Pro Move has colour e-ink) |
-
-Override keys (any subset): `page_width_in`, `page_height_in`, `margin_in`, `font_size_pt`, `color`, `remarkable_folder`. The `name` key cannot be overridden.
-
-**Strict-mono PDFs**: operators who want the PDF bytes themselves to be grayscale can opt the relevant profile in with `"color": false` in an override. The rm2 device displays grayscale regardless, so this override is mostly useful if you view the PDF on a colour viewer.
-
-**Filename**: every build always writes `renewsable-YYYY-MM-DD-<profile>.pdf`, whether one or many profiles are configured. The per-profile `remarkable_folder` override (or the base `remarkable_folder`) determines the upload destination.
-
-### Upgrade note: filename format change from the pre-profile version
-
-Before device profiles, built PDFs were named `renewsable-YYYY-MM-DD.pdf`. Every build now always includes the profile suffix (`-rm2` by default), so after the first post-upgrade run you will have one stranded un-suffixed file on the reMarkable cloud from your last pre-upgrade build — delete it once on the tablet. Subsequent days converge to `renewsable-YYYY-MM-DD-rm2.pdf` and there is no further drift.
+Every build writes a single file at `<output_dir>/renewsable-YYYY-MM-DD.epub`. Re-running on the same date overwrites the previous file in place; the upload uses `rmapi put --force` so the cloud copy is replaced too.
 
 ## Daily operation
 
-Nothing. The `systemd --user` timer fires at `schedule_time`, `Builder` fetches feeds and invokes `goosepaper`, `Uploader` invokes `rmapi put --force`, and the paper shows up on the tablet.
+Nothing. The `systemd --user` timer fires at `schedule_time`, `Builder` fetches feeds, extracts articles, and assembles the EPUB; `Uploader` invokes `rmapi put --force`, and the digest shows up on the tablet.
 
 To look at what happened:
 
@@ -213,8 +166,7 @@ renewsable test-pipeline       # verbose (at least INFO), prints progress
 
 ## Docker (optional, developer only)
 
-For exercising the full build pipeline in a Linux sandbox — useful on macOS
-when you don't want to install Pango/Cairo/HarfBuzz system-wide. The image
+For exercising the full build pipeline in a Linux sandbox. The image
 deliberately omits `rmapi` and `systemd`; it is not a production runtime.
 The Pi deployment story (bootstrap + systemd user timer) remains the
 supported path.
@@ -229,7 +181,7 @@ docker run --rm \
   --config /config/config.example.json build
 ```
 
-The produced PDF lands at `$HOME/.local/state/renewsable/renewsable/out/renewsable-YYYY-MM-DD.pdf`
+The produced EPUB lands at `$HOME/.local/state/renewsable/renewsable/out/renewsable-YYYY-MM-DD.epub`
 on the host via the bind-mount (the inner `renewsable/` suffix is XDG's
 per-app namespace under `$XDG_STATE_HOME`). Logs land in
 `$HOME/.local/state/renewsable/renewsable/logs/renewsable.log`.
@@ -282,7 +234,7 @@ per-app namespace under `$XDG_STATE_HOME`). Logs land in
 
 ## Architecture (one-liner)
 
-Single-process Python orchestrator: `Config → Builder (goosepaper subprocess) → Uploader (rmapi subprocess)`, scheduled by a `systemd --user` timer whose unit files are rendered and installed by the `Scheduler` component. Full design in `.kiro/specs/daily-paper/design.md`; config schema authority in `src/renewsable/config.py` and `config/README.md`.
+Single-process Python orchestrator: `Config → Builder (in-process article extraction + ebooklib EPUB assembly) → Uploader (rmapi subprocess)`, scheduled by a `systemd --user` timer whose unit files are rendered and installed by the `Scheduler` component. Full design in `.kiro/specs/epub-output/design.md`; config schema authority in `src/renewsable/config.py` and `config/README.md`.
 
 ## License
 

@@ -1,32 +1,32 @@
-"""Uploader: push the built PDF to the user's reMarkable cloud folder.
+"""Uploader: push the built EPUB to the user's reMarkable cloud folder.
 
 Design reference: the "Uploader" component block in
 ``.kiro/specs/daily-paper/design.md``.
 
 Requirements covered:
-- 4.1 ``run`` (build+upload) uploads the resulting PDF.
+- 4.1 ``run`` (build+upload) uploads the resulting EPUB.
 - 4.2 Create the destination folder if missing (``rmapi mkdir``); treat
   "already exists" stderr patterns as success.
 - 4.3 Re-upload of the same date replaces the prior file — via
   ``rmapi put --force``.
-- 4.4 Upload failure → ``UploadError`` with the folder, the local PDF
-  path, and the (redacted) captured stderr. The local PDF is never
+- 4.4 Upload failure → ``UploadError`` with the folder, the local EPUB
+  path, and the (redacted) captured stderr. The local EPUB is never
   removed so the user can re-upload later.
 - 6.4 Missing / rejected device token → ``UploadError`` whose remediation
   names the ``renewsable pair`` command, and is not retried.
-- 8.4 The failure message identifies folder, local PDF path, and reason.
+- 8.4 The failure message identifies folder, local EPUB path, and reason.
 - 9.3 Bounded retries with exponential backoff between attempts
   (``config.upload_retries`` total, base ``config.upload_backoff_s``).
 - 9.5 No hang / partial upload: every subprocess is bounded by the
   module-level ``_RMAPI_TIMEOUT_S`` constant; timeouts raise
   ``UploadError`` without retrying. Token failures raise on first
-  attempt. A successful run leaves exactly the current ``pdf.name`` in
-  the folder (``--force``).
+  attempt. A successful run leaves exactly the current uploaded file
+  in the folder (``--force``).
 
 Shape
 -----
 One class, two subprocess invocations: first ``rmapi mkdir <folder>``,
-then ``rmapi put --force <pdf> <folder>/``. The ``put`` step is wrapped
+then ``rmapi put --force <file> <folder>/``. The ``put`` step is wrapped
 in a bounded retry loop. Stderr from the last failing attempt is
 captured and run through the redaction helpers from
 :mod:`renewsable.logging_setup` before being embedded in the raised
@@ -173,7 +173,7 @@ def _redact(text: str) -> str:
 
 
 class Uploader:
-    """Push a PDF to the user's reMarkable cloud folder via ``rmapi``.
+    """Push an EPUB to the user's reMarkable cloud folder via ``rmapi``.
 
     Parameters
     ----------
@@ -192,9 +192,13 @@ class Uploader:
     def upload(self, pdf: Path, folder: str | None = None) -> None:
         """Ensure ``folder`` exists on the cloud and upload ``pdf`` into it.
 
-        ``folder`` defaults to ``config.remarkable_folder``. The PDF is
+        ``folder`` defaults to ``config.remarkable_folder``. The file is
         uploaded with ``--force`` so a re-run for the same date replaces
         the prior file rather than producing a duplicate (Req 4.3).
+
+        The ``pdf`` parameter name is a historical artefact; the Uploader
+        is provider-agnostic and now receives an EPUB path. The name is
+        kept to avoid changing the public API surface.
 
         Raises
         ------
@@ -208,7 +212,7 @@ class Uploader:
               (not retried; remediation points at ``renewsable pair``).
             * A subprocess call exceeded ``_RMAPI_TIMEOUT_S``.
 
-        On any raised ``UploadError`` the local PDF is left in place
+        On any raised ``UploadError`` the local file is left in place
         (Req 4.4); the caller may re-run later.
         """
         cfg = self._config
@@ -292,7 +296,7 @@ class Uploader:
     # ------------------------------------------------------------------
 
     def _run_put_with_retry(self, pdf: Path, folder: str) -> None:
-        """Run ``rmapi put --force <pdf> <folder>/`` with bounded retries.
+        """Run ``rmapi put --force <file> <folder>/`` with bounded retries.
 
         Retries only on non-token failure classes. Between attempts, sleep
         ``upload_backoff_s * 2**attempt_idx`` seconds (``attempt_idx``
@@ -300,7 +304,7 @@ class Uploader:
         4s, 8s — the "small, bounded" schedule Req 9.3 calls for.
 
         On exhaustion, raises :class:`UploadError` naming the folder, the
-        local PDF path, and the redacted stderr of the final attempt.
+        local file path, and the redacted stderr of the final attempt.
         """
         cfg = self._config
         # Trailing slash signals "upload *into* this folder" to rmapi.
@@ -385,7 +389,7 @@ class Uploader:
                 _time.sleep(delay)
 
         # All retries exhausted on non-token failure classes. Leave the
-        # local PDF in place (Req 4.4) and surface a message that names
+        # local file in place (Req 4.4) and surface a message that names
         # folder, local path, and the (redacted) final stderr (Req 8.4).
         redacted_last = _redact((last_stderr or "").strip())
         raise UploadError(
@@ -395,6 +399,6 @@ class Uploader:
             ),
             remediation=(
                 "inspect the log for per-attempt errors; common causes are "
-                "network flakiness, reMarkable cloud downtime, or an oversized PDF"
+                "network flakiness, reMarkable cloud downtime, or an oversized EPUB"
             ),
         )

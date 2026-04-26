@@ -42,11 +42,11 @@ class ConfigError(RenewsableError):
 
 
 class BuildError(RenewsableError):
-    """Raised when the Builder cannot produce today's PDF."""
+    """Raised when the Builder cannot produce today's EPUB."""
 
 
 class UploadError(RenewsableError):
-    """Raised when uploading the PDF to the reMarkable cloud fails."""
+    """Raised when uploading the EPUB to the reMarkable cloud fails."""
 
 
 class PairingError(RenewsableError):

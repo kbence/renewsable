@@ -21,8 +21,8 @@ htmlcov/
 # Logs
 *.log
 
-# Output PDFs from manual runs
-renewsable-*.pdf
+# Output EPUBs from manual runs
+renewsable-*.epub
 
 # OS
 .DS_Store

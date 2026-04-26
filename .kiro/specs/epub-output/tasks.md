@@ -90,7 +90,7 @@
 
 - [ ] 4. Validation: cross-component integration tests
 
-- [ ] 4.1 End-to-end build integration test with mocked network
+- [x] 4.1 End-to-end build integration test with mocked network
   - Add an integration test in `tests/test_builder.py` (or a new `tests/test_pipeline.py`) that monkeypatches `http.fetch_with_retry` to return canned RSS bytes, canned article HTML (with relative `<img src>` references), and canned image bytes, and runs `Builder(config).build(today=fixed_date)`.
   - Assert: the produced EPUB exists at `<output_dir>/renewsable-<fixed_date>.epub`; nav has one entry per article; metadata fields match Req 6.1–6.4; embedded images are present at internal paths; one of the images was canned to fail and is replaced by a `renewsable-missing-image` span; relative `<img src>` values were resolved to absolute before fetch.
   - Assert the failure path: with all canned articles unusable, `Builder.build` raises `BuildError` and no `.epub` file is left at `output_path`.
@@ -99,7 +99,7 @@
   - _Boundary: Builder, articles, epub, http_
   - _Depends: 3.2, 3.3, 3.4_
 
-- [ ] 4.2 Full test-suite sweep and dead-code grep
+- [x] 4.2 Full test-suite sweep and dead-code grep
   - Run `pytest -q` and confirm the entire suite is green with the goosepaper/PDF/profile tests deleted and the new EPUB tests in their place.
   - Grep for any remaining "goosepaper", "WeasyPrint", "PDF", `\.pdf\b`, "DeviceProfile", "BUILTIN_PROFILES", "rmapy" mentions in `src/`, `tests/`, and `pyproject.toml`. Each remaining mention must be either intentionally retained (e.g., a release note explicitly mentioning the migration) or removed.
   - Observable completion: `pytest -q` exits 0; the grep above returns no unintentional matches; `pip check` reports no broken dependencies.

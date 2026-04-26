@@ -97,7 +97,7 @@ def default_config_path() -> Path:
 
 
 def default_output_dir() -> Path:
-    """Default directory for daily PDF artefacts.
+    """Default directory for daily EPUB artefacts.
 
     ``$XDG_STATE_HOME/renewsable/out`` else ``~/.local/state/renewsable/out``.
     """

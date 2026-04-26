@@ -4,12 +4,12 @@ Design reference: the "Uploader" component block in
 ``.kiro/specs/daily-paper/design.md``.
 
 Requirements covered:
-- 4.1 The combined build+upload flow uploads the produced PDF.
+- 4.1 The combined build+upload flow uploads the produced EPUB.
 - 4.2 If the destination folder does not exist, create it before uploading.
 - 4.3 Re-upload of the same date replaces the prior file (``put --force``).
-- 4.4 Upload failure → non-zero, log folder/path/reason, keep local PDF.
+- 4.4 Upload failure → non-zero, log folder/path/reason, keep local EPUB.
 - 6.4 Missing/rejected token → explanatory error with "run `renewsable pair`".
-- 8.4 Upload failure log identifies folder, local PDF path, reason.
+- 8.4 Upload failure log identifies folder, local EPUB path, reason.
 - 9.3 Bounded retries with exponential backoff.
 - 9.5 No hang / crash / partial upload on upload failure.
 

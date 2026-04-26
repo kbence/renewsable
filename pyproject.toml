@@ -23,8 +23,9 @@ dependencies = [
     "readability-lxml==0.8.1",
     # lxml >= 5 moved lxml.html.clean into a separate package. readability-lxml
     # still imports from the old location, so we must install the detached
-    # module explicitly. Without this, goosepaper's RSS provider crashes with
-    # `ImportError: lxml.html.clean module is now a separate project`.
+    # module explicitly. Without this, readability-lxml's article extraction
+    # crashes with `ImportError: lxml.html.clean module is now a separate
+    # project`.
     "lxml_html_clean",
 ]
 
