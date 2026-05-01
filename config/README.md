@@ -31,46 +31,58 @@ and the exact path of the file that needs editing (Requirements 1.3 / 1.4).
 
 Required fields **must** be present; the loader rejects unknown top-level keys
 so typos like `stoires` or `schedule_tlme` fail fast instead of silently
-falling back to a default.
+falling back to a default. Legacy keys that used to control goosepaper or the
+device-profile system (`font_size`, `goosepaper_bin`, `subprocess_timeout_s`,
+`device_profile`, `device_profiles`) are explicitly rejected with a remediation
+message; remove them when migrating an old config.
 
 | Field                  | Type             | Required | Default                                  | Meaning                                                                 |
 |------------------------|------------------|----------|------------------------------------------|-------------------------------------------------------------------------|
 | `schedule_time`        | string `HH:MM`   | yes      | —                                        | 24-hour local wall-clock time when the daily build runs.                 |
 | `remarkable_folder`    | string           | yes      | —                                        | Destination folder on the reMarkable. Must start with `/` (e.g. `/News`). |
-| `stories`              | list of objects  | yes      | —                                        | Non-empty list of goosepaper story providers. See below.                 |
-| `output_dir`           | string (path)    | no       | XDG state dir (`$XDG_STATE_HOME/renewsable` or `~/.local/state/renewsable`) | Where generated PDFs / EPUBs are written. Supports `~` expansion.         |
-| `font_size`            | integer          | no       | goosepaper default                       | Forwarded to goosepaper when present.                                    |
+| `stories`              | list of objects  | yes      | —                                        | Non-empty list of RSS feed sources. See below for the closed-set schema. |
+| `output_dir`           | string (path)    | no       | XDG state dir (`$XDG_STATE_HOME/renewsable` or `~/.local/state/renewsable`) | Where generated EPUBs are written. Supports `~` expansion.               |
 | `log_dir`              | string (path)    | no       | XDG state dir log subfolder              | Where rotating log files land. Supports `~` expansion.                   |
-| `user_agent`           | string           | no       | `renewsable/0.1 (+https://github.com/kbence/renewsable)` | User-Agent sent on feed fetches.                           |
-| `goosepaper_bin`       | string           | no       | `goosepaper`                             | Command name or absolute path to the goosepaper executable.             |
+| `user_agent`           | string           | no       | `renewsable/0.1 (+https://github.com/kbence/renewsable)` | User-Agent sent on feed and article fetches.               |
 | `rmapi_bin`            | string           | no       | `rmapi`                                  | Command name or absolute path to the rmapi executable.                   |
-| `feed_fetch_retries`   | integer > 0      | no       | `3`                                      | How many times a failing feed fetch is retried before giving up.         |
+| `feed_fetch_retries`   | integer > 0      | no       | `3`                                      | How many times a failing feed/article fetch is retried before giving up. |
 | `feed_fetch_backoff_s` | number > 0       | no       | `1.0`                                    | Base seconds between feed-fetch retries (exponential, capped internally).|
 | `upload_retries`       | integer > 0      | no       | `3`                                      | How many times a failing reMarkable upload is retried.                   |
 | `upload_backoff_s`     | number > 0       | no       | `2.0`                                    | Base seconds between upload retries.                                     |
-| `subprocess_timeout_s` | integer > 0      | no       | `180`                                    | Hard timeout for `goosepaper` and `rmapi` subprocess invocations.        |
 
 `output_dir` is intentionally **absent** from the example so the default XDG
 location is exercised; uncomment (i.e. add) the key only if you need a custom
 path.
 
-## `stories` — goosepaper provider schema
+## `stories` — RSS feed source schema
 
-Each entry is a `{provider, config}` object handed straight to
-[goosepaper](https://github.com/j6k4m8/goosepaper). `renewsable` does not
-validate the `config` payload beyond "it is a dict"; goosepaper owns the
-per-provider contract. The example uses goosepaper's built-in `rss` provider,
-which accepts:
+Each entry is a closed-set `{provider, config}` object validated by
+`Config.load`. Only the RSS provider is supported; renewsable parses feeds
+in-process via [`feedparser`](https://feedparser.readthedocs.io/) and extracts
+each article's main content via
+[`trafilatura`](https://trafilatura.readthedocs.io/) (with `readability-lxml`
+as a secondary fallback).
 
-| Field      | Type    | Meaning                                                                |
-|------------|---------|------------------------------------------------------------------------|
-| `rss_path` | string  | Feed URL (Atom or RSS). Required.                                      |
-| `limit`    | integer | Maximum number of items to pull from the feed. Optional; we default to 5. |
+```json
+{
+  "provider": "rss",
+  "config": {
+    "rss_path": "https://example.com/feed.xml",
+    "limit": 5
+  }
+}
+```
 
-Other providers documented by goosepaper (`wikipedia_current_events`,
-`reddit`, `hackernews`, etc.) also work — just use the same `{provider,
-config}` shape. See goosepaper's `stories` module for the full list and
-per-provider fields: <https://github.com/j6k4m8/goosepaper>.
+| Key                | Type    | Required | Meaning                                                                |
+|--------------------|---------|----------|------------------------------------------------------------------------|
+| `provider`         | string  | yes      | Must equal `"rss"`. Any other value is a `ConfigError`.                |
+| `config.rss_path`  | string  | yes      | Feed URL. Must start with `http://` or `https://`.                     |
+| `config.limit`     | int > 0 | no       | Maximum number of items pulled from this source per build. Omitted means no per-source cap. |
+
+Unknown keys at either level (e.g., `style`, `font_size`, or any goosepaper
+provider beyond `rss`) are rejected with a `ConfigError` naming the offending
+field. This is the migration error path for configs left over from the
+goosepaper era.
 
 ### Feeds shipped in the example
 
@@ -87,45 +99,15 @@ Add or remove entries by editing the `stories` array. The loader requires the
 array to be **non-empty**; an empty list raises `ConfigError` with a remediation
 hint.
 
-## Device profiles
-
-The shipped example is a **single-profile** config — it omits the profile key and gets the built-in `rm2` default so operators upgrading from the pre-profile version see no behavioural change. To tune the PDF for a different device, add one of these three shapes:
-
-**Shorthand (single profile, built-in defaults)**:
-```json
-{ "device_profile": "paper_pro_move" }
-```
-
-**Single profile with overrides (e.g. distinct destination folder)**:
-```json
-{
-  "device_profile": {
-    "name": "paper_pro_move",
-    "remarkable_folder": "/News-Move"
-  }
-}
-```
-
-**Multi-profile (one PDF per profile per run, typical for a shared deployment)**:
-```json
-{
-  "device_profiles": [
-    { "name": "rm2" },
-    { "name": "paper_pro_move", "remarkable_folder": "/News-Move" }
-  ]
-}
-```
-
-Supported built-in profiles, override keys, and the strict-mono `color: false` toggle are documented in the project README's "Device profiles" section. A config may declare either `device_profile` or `device_profiles`, not both.
-
 ## Validation sanity check
 
-Before deploying a modified copy, run:
+Before deploying a modified copy, attempt a build:
 
 ```bash
-renewsable build --config /path/to/your/config.json --dry-run
+renewsable build --config /path/to/your/config.json
 ```
 
-A dry-run exits with code 0 only when the file parses cleanly and all
-invariants hold; any `ConfigError` message names the offending field and the
-exact file path, per Requirement 1.4.
+The loader validates the file before any real work; any `ConfigError` names
+the offending field and the exact file path (Requirement 1.4). You can
+interrupt with Ctrl+C once the build moves past the config-load phase if you
+only wanted to validate.
