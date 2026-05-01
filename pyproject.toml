@@ -14,11 +14,13 @@ dependencies = [
     "click>=8.1",
     "ebooklib>=0.18",
     "feedparser>=6.0",
-    # readability-lxml 0.8.4.1 regressed its encoding-detection path: its
-    # RE_CHARSET/RE_PRAGMA/RE_XML regexes are compiled as str, but some
-    # article responses reach them as bytes and raise
-    # `TypeError: cannot use a string pattern on a bytes-like object`.
-    # 0.8.1 is the last version without this mismatch. Pin until the
+    "trafilatura>=2.0.0,<3",
+    # readability-lxml is the secondary fallback inside articles._extract_body
+    # (trafilatura is the primary extractor); it stays pinned because 0.8.4.1
+    # regressed its encoding-detection path: its RE_CHARSET/RE_PRAGMA/RE_XML
+    # regexes are compiled as str, but some article responses reach them as
+    # bytes and raise `TypeError: cannot use a string pattern on a bytes-like
+    # object`. 0.8.1 is the last version without this mismatch. Pin until the
     # upstream fix lands.
     "readability-lxml==0.8.1",
     # lxml >= 5 moved lxml.html.clean into a separate package. readability-lxml

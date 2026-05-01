@@ -102,7 +102,8 @@ FEED2_XML_EMPTY = _rss(
 
 
 # Article HTML with a relative image and an absolute image. Body padded so
-# readability picks the article element rather than falling back.
+# the extractor chain (trafilatura primary, readability-lxml secondary)
+# picks the <article> element rather than falling back to the RSS summary.
 ARTICLE_A_HTML = (
     "<html><body><article>"
     "<h1>Article A</h1>"

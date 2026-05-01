@@ -99,8 +99,8 @@ def _install_fakes(
 # ---------------------------------------------------------------------------
 
 
-def test_happy_path_extracts_readability_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Req 3.1: article URL fetched, main body extracted via readability."""
+def test_happy_path_extracts_via_trafilatura(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Req 1.1, 1.2, 5.1: article URL fetched, main body extracted via trafilatura."""
     feed_bytes = b"<rss>fake</rss>"
     article_html = (
         "<html><head><title>Hello</title></head><body>"
@@ -136,10 +136,277 @@ def test_happy_path_extracts_readability_body(monkeypatch: pytest.MonkeyPatch) -
     assert isinstance(a, Article)
     assert a.title == "Hello"
     assert a.source_url == art_url
-    # Readability-extracted prose appears in the html.
+    # Trafilatura-extracted prose appears in the html.
     assert "actual story body" in a.html
     # Boilerplate stripped.
     assert "<script" not in a.html.lower()
+
+
+# ---------------------------------------------------------------------------
+# Trafilatura fallback chain tests (Req 1, 2, 3, 4)
+# ---------------------------------------------------------------------------
+
+
+def _readability_friendly_html() -> str:
+    """Real HTML that readability extracts cleanly so we can prove fall-through."""
+    return (
+        "<html><head><title>Hello</title></head><body>"
+        "<header>nav</header>"
+        "<article><h1>Hello world</h1>"
+        "<p>This is the actual story body that readability should keep "
+        "because it is the longest contiguous block of prose on the page "
+        "and dominates the candidate scoring algorithm used by readability-lxml.</p>"
+        "<p>And another paragraph of real content to push the score up so that "
+        "readability has plenty of material to lock onto when scoring.</p>"
+        "</article>"
+        "<footer>foot</footer></body></html>"
+    )
+
+
+def test_falls_back_to_readability_when_trafilatura_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Req 2.2, 2.3: trafilatura empty -> readability wins."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    feed = _FakeFeed([{"title": "T", "link": art_url, "summary": "rss desc"}])
+
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: _readability_friendly_html().encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    def fake_extract(*args: Any, **kwargs: Any) -> Any:
+        return None
+
+    monkeypatch.setattr(articles_mod.trafilatura, "extract", fake_extract)
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert "actual story body" in out[0].html
+
+
+def test_falls_back_to_readability_when_trafilatura_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Req 2.1, 6.1: trafilatura raises -> readability wins; collect doesn't raise."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    feed = _FakeFeed([{"title": "T", "link": art_url, "summary": "rss desc"}])
+
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: _readability_friendly_html().encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    def fake_extract(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(articles_mod.trafilatura, "extract", fake_extract)
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert "actual story body" in out[0].html
+
+
+def test_falls_back_to_rss_summary_when_both_extractors_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Req 3.1, 6.1: trafilatura None + readability empty -> RSS summary wins."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    feed = _FakeFeed(
+        [
+            {
+                "title": "T",
+                "link": art_url,
+                "summary": "<p>fallback summary text</p>",
+            }
+        ]
+    )
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: _readability_friendly_html().encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    monkeypatch.setattr(articles_mod.trafilatura, "extract", lambda *a, **kw: None)
+
+    class _EmptyDoc:
+        def __init__(self, html: str) -> None:
+            self._html = html
+
+        def summary(self) -> str:
+            return ""
+
+    monkeypatch.setattr(articles_mod, "Document", _EmptyDoc)
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert "fallback summary text" in out[0].html
+
+
+def test_trafilatura_full_document_output_is_normalized_to_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Locks design Issue-1 fix: full <html><body> output normalized to fragment."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    feed = _FakeFeed([{"title": "T", "link": art_url, "summary": ""}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: b"<html><body>orig</body></html>"},
+        feed_map={feed_bytes: feed},
+    )
+
+    monkeypatch.setattr(
+        articles_mod.trafilatura,
+        "extract",
+        lambda *a, **kw: "<html><body><p>main content</p></body></html>",
+    )
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    html = out[0].html
+    assert "main content" in html
+    lower = html.lower()
+    assert "<html" not in lower, f"expected no <html in {html!r}"
+    assert "<body" not in lower, f"expected no <body in {html!r}"
+
+
+def _bbc_style_nextjs_html() -> tuple[str, list[str]]:
+    """Build a BBC/Next.js-shaped page with deep nesting and styled-component <p> siblings.
+
+    No <article>/<main>; ≥4 levels of <div>; ≥5 sibling <p class="sc-XXXXXXXX-N">
+    at the deepest level; each paragraph carries ≥30 words of article-like prose.
+    """
+    paragraphs = [
+        (
+            "The independent inquiry published its long-awaited findings on Tuesday morning, "
+            "concluding that systemic failures across multiple agencies contributed directly "
+            "to the outcome and recommending a sweeping overhaul of how interagency referrals "
+            "are processed throughout the country going forward and into the next decade entirely."
+        ),
+        (
+            "Local officials reacted to the report with a mixture of public contrition and "
+            "private frustration, noting that several of the recommendations had already been "
+            "raised internally years earlier but had stalled under successive funding cuts and "
+            "staff reorganizations that left frontline teams understaffed and unable to coordinate."
+        ),
+        (
+            "Campaigners welcomed the conclusions but warned that without binding deadlines and "
+            "an independent monitoring body the same pattern of slow drift could repeat itself, "
+            "pointing to two earlier reviews whose recommendations had been only partially "
+            "implemented despite cross-party support and unanimous parliamentary backing at the time."
+        ),
+        (
+            "Academics studying organizational behavior in public services said the findings "
+            "echoed a familiar pattern in which clear individual diligence is undermined by "
+            "fragmented data systems, inconsistent record-keeping standards, and a culture of "
+            "vertical reporting that discourages the kind of horizontal communication needed here."
+        ),
+        (
+            "The minister responsible told parliament that the government accepted the "
+            "recommendations in principle and would publish a detailed implementation plan within "
+            "twelve weeks, while the opposition pressed for a statutory timetable and a named "
+            "senior official accountable for delivery against measurable milestones every quarter."
+        ),
+    ]
+    # Each paragraph wrapped in its own 4-level <div> chain — this is the
+    # shape that defeats readability's "single-largest candidate" heuristic
+    # because no shared parent encloses all five paragraphs together. The
+    # whole block lives inside another wrapper layer (`#__next`) so the
+    # deepest <p> is at >=4 div ancestors.
+    inner = "".join(
+        f'<div class="sc-w-{i}-0"><div class="sc-w-{i}-1">'
+        f'<div class="sc-w-{i}-2"><div class="sc-w-{i}-3">'
+        f'<p class="sc-abcd1234-{i}">{text}</p>'
+        "</div></div></div></div>"
+        for i, text in enumerate(paragraphs)
+    )
+    page = (
+        "<!DOCTYPE html><html><head><title>BBC-style</title></head><body>"
+        '<div id="__next">' + inner + "</div>"
+        "</body></html>"
+    )
+    return page, paragraphs
+
+
+def test_bbc_style_nextjs_html_extracts_multi_paragraph_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Req 4.1: BBC/Next.js-shaped pages produce multi-paragraph bodies via trafilatura,
+    and readability alone produces substantially less content (differentiator)."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://www.bbc.com/news/world-12345678"
+    page, paragraphs = _bbc_style_nextjs_html()
+
+    # Sanity-check the fixture shape.
+    import lxml.html as _lh
+
+    parsed = _lh.fromstring(page)
+    assert not parsed.xpath("//article"), "fixture must not contain <article>"
+    assert not parsed.xpath("//main"), "fixture must not contain <main>"
+    # ≥4 levels of nested <div>: any <div> with >=4 <div> ancestors.
+    deep_divs = parsed.xpath("//div[count(ancestor::div) >= 4]")
+    assert deep_divs, "fixture must have at least 4 levels of nested <div>"
+    sibling_ps = parsed.xpath('//p[starts-with(@class, "sc-")]')
+    assert len(sibling_ps) >= 5, f"need >=5 styled <p>, got {len(sibling_ps)}"
+    for p in paragraphs:
+        assert len(p.split()) >= 30
+
+    # --- (a) trafilatura path ---
+    feed_a = _FakeFeed([{"title": "T", "link": art_url, "summary": ""}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: page.encode()},
+        feed_map={feed_bytes: feed_a},
+    )
+    out_t = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+    assert len(out_t) == 1, "trafilatura path must produce an article"
+    traf_html = out_t[0].html
+
+    # At least three of the five paragraphs' opening phrases must be present.
+    opener_hits = sum(
+        1 for p in paragraphs if p.split(",")[0][:40] in traf_html
+    )
+    assert opener_hits >= 3, (
+        f"trafilatura output should contain text from >=3 paragraphs, "
+        f"got {opener_hits}; html={traf_html[:500]!r}"
+    )
+
+    # --- (b) readability-only path: monkeypatch trafilatura.extract -> None ---
+    feed_b = _FakeFeed([{"title": "T", "link": art_url, "summary": ""}])
+    # Re-install fakes for the second collect() call (monkeypatches from the
+    # first _install_fakes are still active, but we want a fresh feed object).
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: page.encode()},
+        feed_map={feed_bytes: feed_b},
+    )
+    monkeypatch.setattr(articles_mod.trafilatura, "extract", lambda *a, **kw: None)
+    out_r = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    readability_chars = len(out_r[0].html) if out_r else 0
+    trafilatura_chars = len(traf_html)
+    assert trafilatura_chars > 0
+    ratio = readability_chars / trafilatura_chars
+    assert ratio < 0.30, (
+        f"differentiator failed: readability produced {readability_chars} chars vs "
+        f"trafilatura {trafilatura_chars} chars (ratio {ratio:.2f}); "
+        f"this fixture should be a real Next.js-vs-readability differentiator"
+    )
 
 
 def test_rss_description_fallback_when_article_fetch_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,7 +538,17 @@ def test_protocol_relative_img_src_resolved(monkeypatch: pytest.MonkeyPatch) -> 
 
     out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
 
-    assert "https://cdn.example.com/x.png" in out[0].html
+    # Either scheme is acceptable: trafilatura resolves protocol-relative
+    # URLs to ``http://`` internally (regardless of the page URL's scheme),
+    # and the existing ``_resolve_url`` allows-list permits both http and
+    # https. The resolution-correctness invariant is that the protocol-
+    # relative form does not survive in the final output.
+    html = out[0].html
+    assert (
+        "https://cdn.example.com/x.png" in html
+        or "http://cdn.example.com/x.png" in html
+    )
+    assert 'src="//cdn.example.com/x.png"' not in html
 
 
 def test_data_and_javascript_urls_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
