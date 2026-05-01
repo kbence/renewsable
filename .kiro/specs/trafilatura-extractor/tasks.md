@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Add `trafilatura` as a runtime dependency
+- [x] 1. Add `trafilatura` as a runtime dependency
   - Add `trafilatura>=2.0.0,<3` to `[project] dependencies` in `pyproject.toml`. Place it alongside the existing `feedparser`/`ebooklib`/`readability-lxml` entries; do not remove or modify any other dependency.
   - Run `python -c "import tomllib; tomllib.load(open('pyproject.toml','rb'))"` to confirm valid TOML.
   - Run `pip install -e .` in the project venv. Confirm `pip check` reports no broken requirements.
