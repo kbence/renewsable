@@ -6,7 +6,9 @@
 #
 # What it does (idempotent):
 #   1. Sanity-checks the working directory and the host architecture.
-#   2. Installs apt prerequisites for WeasyPrint + Hungarian/Latin fonts.
+#   2. Installs apt prerequisites: a baseline of system libraries plus
+#      Hungarian/Latin fonts (mostly inherited from the goosepaper/WeasyPrint
+#      era; harmless to keep now that output is EPUB).
 #   3. Creates a project-local venv at .venv and installs renewsable[dev]
 #      in editable mode.
 #   4. Downloads the pinned ddvk/rmapi linux-arm64 release tarball, verifies
@@ -79,10 +81,14 @@ require_cmd install
 require_cmd sha256sum
 
 # --- 4. apt install system dependencies (idempotent) -------------------------
-# WeasyPrint (used transitively by goosepaper) needs Pango/HarfBuzz/ffi and a
-# few helper Python bindings. fonts-dejavu + fonts-noto-core give us full
-# coverage of Hungarian accented characters (Req 3.2) without pulling in the
-# full noto-fonts metapackage.
+# Baseline set originally chosen for the goosepaper/WeasyPrint era: Pango,
+# HarfBuzz, libffi, and helper Python bindings supported PDF rendering.
+# Output is now EPUB (assembled in-process via ebooklib) and the reMarkable
+# reader picks fonts itself, so most of these are no longer load-bearing
+# for renewsable's runtime, but kept as a harmless baseline. python3-cffi
+# and python3-brotli remain useful for the lxml/trafilatura stack.
+# fonts-dejavu + fonts-noto-core stay because Hungarian-supporting fonts
+# are cheap to keep and useful system-wide.
 APT_PACKAGES=(
   python3-dev
   python3-pip

@@ -12,8 +12,12 @@ Idempotent: re-running it is safe.
 
 1. Refuses to run anywhere other than Linux on `aarch64` / `arm64` (including
    an explicit, loud failure on macOS and on the 32-bit `armhf` Pi images).
-2. `apt install`s the WeasyPrint system libraries and the DejaVu + Noto Core
-   fonts needed to render English and Hungarian text without mojibake:
+2. `apt install`s a baseline set of system libraries plus DejaVu + Noto Core
+   fonts. Some of these (Pango, HarfBuzz) were originally required for
+   WeasyPrint-based PDF rendering in the goosepaper era; they are kept as a
+   harmless baseline now that output is EPUB and the reMarkable reader picks
+   fonts. `python3-cffi` and `python3-brotli` remain useful for the
+   `lxml` / `trafilatura` stack:
 
    ```
    python3-dev python3-pip python3-venv python3-cffi python3-brotli
