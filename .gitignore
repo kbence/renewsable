@@ -27,4 +27,4 @@ renewsable-*.epub
 # OS
 .DS_Store
 
-.claude
+.claude/settings.local.json
