@@ -35,6 +35,7 @@ from dataclasses import dataclass
 
 import feedparser  # type: ignore[import-untyped]
 import lxml.html
+import trafilatura  # type: ignore[import-untyped]
 from readability import Document  # type: ignore[import-untyped]
 
 try:  # lxml >= 5 split clean out into a separate package; fall back gracefully.
@@ -245,18 +246,115 @@ def _extract_body(
     retries: int,
     backoff_s: float,
 ) -> str:
-    """Try the article URL via readability; fall back to RSS desc/content."""
+    """Try trafilatura first, then readability, then RSS desc/content.
+
+    Order locked by Req 1.1, 2.1/2.2, 3.1. The trafilatura output is normalized
+    to a fragment via :func:`_normalize_trafilatura_output` so a full
+    ``<html><body>...</body></html>`` document does not survive
+    ``Cleaner(page_structure=False)`` and surface as nested wrappers in the
+    EPUB chapter.
+    """
     try:
         raw = _http.fetch_with_retry(link, ua=ua, retries=retries, backoff_s=backoff_s)
-        html_text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    except Exception as exc:
+        logger.info("article fetch failed for %s (%s); trying RSS fallback", link, exc)
+        return _rss_fallback_html(entry)
+
+    html_text = (
+        raw.decode("utf-8", errors="replace")
+        if isinstance(raw, (bytes, bytearray))
+        else str(raw)
+    )
+
+    # 1) Trafilatura — primary extractor (Req 1.1, 1.2, 1.3).
+    traf_raised = False
+    traf_result: str | None = None
+    try:
+        traf_result = trafilatura.extract(
+            html_text,
+            output_format="html",
+            include_images=True,
+            include_links=True,
+            url=link,
+        )
+    except Exception as exc:
+        logger.info(
+            "trafilatura raised for %s (%s); trying readability", link, exc
+        )
+        traf_raised = True
+
+    if traf_result is not None and _has_text(traf_result):
+        return _normalize_trafilatura_output(traf_result)
+    if not traf_raised:
+        logger.info(
+            "trafilatura returned empty body for %s; trying readability", link
+        )
+
+    # 2) Readability — secondary fallback (Req 2.1, 2.2, 2.3).
+    try:
         body = Document(html_text).summary()
         if body and _has_text(body):
             return body
         logger.info("readability returned empty body for %s; trying RSS fallback", link)
     except Exception as exc:
-        logger.info("article fetch/extract failed for %s (%s); trying RSS fallback", link, exc)
+        logger.info(
+            "readability raised for %s (%s); trying RSS fallback", link, exc
+        )
 
+    # 3) RSS summary — final fallback (Req 3.1).
     return _rss_fallback_html(entry)
+
+
+def _normalize_trafilatura_output(html: str) -> str:
+    """Reduce a trafilatura HTML output to a fragment.
+
+    ``trafilatura.extract(output_format='html')`` may return a fragment, a
+    ``<doc>...</doc>`` wrapper, or a full ``<html><body>...</body></html>``
+    document. Returning a full document upstream would surface as nested
+    ``<html>``/``<body>`` tags inside the EPUB chapter wrapper because
+    ``Cleaner(page_structure=False)`` deliberately preserves them.
+
+    Strategy: parse with ``lxml.html.fromstring``; if a ``<body>`` descendant
+    is present, return its inner HTML; else if an ``<html>`` element is
+    present (without ``<body>``), return its inner HTML; else return ``html``
+    unchanged.
+    """
+    try:
+        parsed = lxml.html.fromstring(html)
+    except Exception:
+        return html
+
+    # Trafilatura's HTML output uses ``<graphic src="...">`` rather than the
+    # standard ``<img src="...">`` element. Rewrite in-place so the
+    # downstream ``_sanitize_and_resolve`` pass — which only iterates ``img``
+    # — can resolve and validate image URLs as it does today.
+    for graphic in parsed.iter("graphic"):
+        graphic.tag = "img"
+
+    def _inner_html(element: object) -> str:
+        text = getattr(element, "text", None) or ""
+        children = "".join(
+            lxml.html.tostring(child, encoding="unicode", method="html")
+            for child in element  # type: ignore[union-attr]
+        )
+        return text + children
+
+    # `lxml.html.fromstring` always returns a single Element. Locate <body>
+    # via descendant search (the element itself may be <html>, <body>, or
+    # something else entirely).
+    body_elements = parsed.xpath(".//body")
+    if not body_elements and getattr(parsed, "tag", None) == "body":
+        body_elements = [parsed]
+    if body_elements:
+        return _inner_html(body_elements[0])
+
+    html_elements = parsed.xpath(".//html")
+    if not html_elements and getattr(parsed, "tag", None) == "html":
+        html_elements = [parsed]
+    if html_elements:
+        return _inner_html(html_elements[0])
+
+    return html
 
 
 def _rss_fallback_html(entry: object) -> str:

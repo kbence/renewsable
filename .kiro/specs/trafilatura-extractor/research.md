@@ -121,3 +121,25 @@ Verified via PyPI / docs / GitHub release notes (research subagent, 2026-05-01):
   5. Test fixture for Req 4: hand-craft a minimal Next.js-shaped HTML (one `<p class="sc-...">` lead + multiple deeper styled-component paragraphs in nested divs) sufficient to demonstrate the multi-paragraph extraction. Avoid shipping a real BBC HTML capture for license reasons.
 - **Carry-forward research items**: none blocking. The library is well-understood; remaining decisions are call-site ergonomics, listed above.
 - **Cross-spec coordination**: none. This change lives entirely inside the `articles` module and `pyproject.toml`. No other spec needs revalidation.
+
+---
+
+## Design Synthesis Outcomes (2026-05-01)
+
+Decisions taken during `/kiro-spec-design` synthesis:
+
+### Generalization
+- Single call site, single function — nothing to generalize across components. The `_has_text` helper is already the single "usable content" predicate; both extractor outputs go through it. No new abstraction needed.
+
+### Build vs. Adopt
+- **Adopt `trafilatura>=2.0.0,<3`**: actively maintained, MIT-compatible (Apache 2.0), drop-in API, returns `None` on failure (no exception path to design around), already lxml>=5 native.
+- **Retain `readability-lxml==0.8.1`**: the existing pin is kept solely as the secondary fallback. Removing it would force a binary "trafilatura or RSS" choice — Req 2 explicitly mandates the intermediate fallback.
+
+### Simplification
+- **No new helper module**: The change is small enough to live inside `articles.py`. A `_run_trafilatura` private helper is optional; inline try/except is acceptable if it doesn't make `_extract_body` hard to read.
+- **No configurability**: Operator cannot select an extractor. Speculative; explicitly out of scope.
+- **Keep one definition of "usable"**: `_has_text` applies to both extractors. Single threshold, single bug class to reason about.
+- **Inline the BBC test fixture**: a hand-crafted Next.js-shaped HTML literal in the test file. Avoids licensing concerns from real BBC HTML and keeps the fixture self-contained.
+
+### Open Questions Carried Forward
+- None blocking. All five Phase-2 design decisions from the gap analysis have been settled in this design (version pin, call signature, `fast=False`, `url=link`, and inline test fixture).

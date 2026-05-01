@@ -9,7 +9,7 @@
   - Observable completion: `pytest -q` exits 0; `python -c "import trafilatura, readability"` exits 0; `pip check` is clean.
   - _Requirements: 1.1_
 
-- [ ] 2. Implement the trafilatura → readability → RSS chain in `_extract_body` and lock it with tests
+- [x] 2. Implement the trafilatura → readability → RSS chain in `_extract_body` and lock it with tests
   - Add `import trafilatura  # type: ignore[import-untyped]` at the top of `src/renewsable/articles.py`, alongside the existing `import feedparser` and `from readability import Document` lines. The module-level import is the test monkeypatch seam (mirrors `articles.feedparser`).
   - Modify `_extract_body(entry, link, *, ua, retries, backoff_s) -> str` to fetch as today, then sequence three extractors:
     1. **trafilatura first**: call `trafilatura.extract(html_text, output_format='html', include_images=True, include_links=True, url=link)` inside a `try/except Exception`. On exception or when the result is `None` or `_has_text(result)` is false, log at INFO and fall through. Otherwise normalize the output (strip any `<html>`/`<body>` wrappers — see Implementation Notes below) and return.
