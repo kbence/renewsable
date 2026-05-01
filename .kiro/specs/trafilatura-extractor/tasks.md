@@ -29,7 +29,7 @@
   - _Boundary: src/renewsable/articles.py, tests/test_articles.py_
   - _Depends: 1_
 
-- [ ] 3. Full-suite regression and smoke verification
+- [x] 3. Full-suite regression and smoke verification
   - Run `pytest -q` and confirm no test failed compared to the baseline before this branch (baseline at the merge-base with `main` was 239 passing).
   - Run `renewsable --help` and confirm the CLI loads cleanly.
   - Run `pip check` and confirm no broken requirements (especially: `trafilatura`, `lxml`, `lxml_html_clean`, `readability-lxml` co-resolve without conflicts).

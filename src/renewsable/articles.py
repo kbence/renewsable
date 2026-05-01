@@ -7,7 +7,9 @@ Design reference: ``.kiro/specs/epub-output/design.md`` →
 Requirements covered:
 
 - 3.1 — for each RSS entry, fetch the linked article URL and extract its
-  main readable content.
+  main readable content. Extraction runs as a chain: ``trafilatura``
+  (primary) → ``readability-lxml`` (secondary fallback) → RSS
+  description/content (final fallback). See ``_extract_body``.
 - 3.2 — apply the same robots.txt check and retry/backoff policy used for
   RSS feed fetches (delegated to ``renewsable.http``).
 - 3.3 — fall back to the RSS entry's own description/content on extraction
@@ -113,8 +115,8 @@ def collect(
     """Build the per-run list of ``Article`` records from validated stories.
 
     Per-entry exceptions never escape: every failure is logged at WARNING
-    and the next entry continues. Only systemic errors (e.g., readability
-    raising at import time) propagate.
+    and the next entry continues. Only systemic errors (e.g., trafilatura
+    or readability raising at import time) propagate.
     """
     out: list[Article] = []
 

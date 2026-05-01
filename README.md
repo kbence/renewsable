@@ -2,7 +2,7 @@
 
 A daily news digest for the reMarkable 2, delivered as an EPUB every morning by a Raspberry Pi.
 
-Pipeline: configurable RSS feeds → in-process article extraction (`feedparser` + `readability-lxml`) → `ebooklib` EPUB assembly → `rmapi` upload to your reMarkable cloud → `systemd` user timer schedules the daily run.
+Pipeline: configurable RSS feeds → in-process article extraction (`feedparser` for RSS parsing; `trafilatura` as the primary article-body extractor with `readability-lxml` as a secondary fallback) → `ebooklib` EPUB assembly → `rmapi` upload to your reMarkable cloud → `systemd` user timer schedules the daily run.
 
 > [!IMPORTANT]
 > **Built with substantial AI assistance.** This project's requirements, design, implementation, and tests were produced through close collaboration with large language models under a spec-driven workflow (`.kiro/specs/`). Every change is human-reviewed before commit, but the code reflects that pairing — expect more LLM fingerprints than in a typical hand-written codebase. If that disqualifies the project for your use case, that is a valid call; if it doesn't, you are warmly welcome.
