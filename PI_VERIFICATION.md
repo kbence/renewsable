@@ -9,7 +9,7 @@ Leave blanks filled in on this document (or in a sibling `PI_VERIFICATION_RESULT
 > Conventions
 > - `$` prefix = run on the Pi as the non-root user that owns the checkout.
 > - All paths are defaults from `config/config.example.json`; adjust if your config overrides `output_dir` / `log_dir` / `remarkable_folder`.
-> - `YYYY-MM-DD` = today's local date. The build uses it for the PDF basename.
+> - `YYYY-MM-DD` = today's local date. The build uses it for the EPUB basename.
 
 ---
 
@@ -86,9 +86,9 @@ Evidence:
 
 ---
 
-## 3. Build only — dated PDF appears locally
+## 3. Build only — dated EPUB appears locally
 
-**Goal:** run the build stage in isolation and confirm a dated PDF lands in the configured output directory. Hungarian content from `telex.hu` must render with correct accents (Requirement 3.2).
+**Goal:** run the build stage in isolation and confirm a dated EPUB lands in the configured output directory. The produced file is a valid EPUB 3 archive and Hungarian content from `telex.hu` is preserved through the pipeline (Requirement 3.2).
 
 Commands:
 
@@ -98,20 +98,25 @@ $ source .venv/bin/activate
 $ renewsable --config config/config.example.json build
 $ ls -la ~/.local/state/renewsable/out/
 $ TODAY=$(date +%Y-%m-%d)
-$ PDF=~/.local/state/renewsable/out/renewsable-${TODAY}-rm2.pdf
-$ stat -c '%n %s bytes' "$PDF"
-$ xxd "$PDF" | head -1
+$ EPUB=~/.local/state/renewsable/out/renewsable-${TODAY}.epub
+$ stat -c '%n %s bytes' "$EPUB"
+$ xxd "$EPUB" | head -1
+$ unzip -p "$EPUB" mimetype
+$ unzip -l "$EPUB" | grep -E "META-INF/container.xml|EPUB/content.opf" | head -2
+$ unzip -p "$EPUB" 'EPUB/chapters/article-001.xhtml' | grep -oE '[őűáéíóú]' | head -5
 ```
 
 Success criteria:
-- `renewsable … build` exits 0 and prints the absolute path of the PDF it wrote.
-- The file at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD-rm2.pdf` exists and has size > 0.
-- `xxd … | head -1` begins with `25504446 2d` (i.e. the literal bytes `%PDF-`).
-- Visual check: open the PDF on the Pi (`xdg-open "$PDF"`) or `scp` it back to the dev box. Hungarian articles from `telex.hu` render with accented characters intact (ő, ű, á, é, í, ó, ú) — no tofu boxes, no mojibake.
+- `renewsable … build` exits 0 and prints the absolute path of the EPUB it wrote.
+- The file at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.epub` exists, has size > 0, and has no profile suffix (single-output post-`epub-output` spec).
+- `xxd … | head -1` begins with `504b 0304` (i.e. the ZIP local-file-header magic `PK\x03\x04`).
+- `unzip -p "$EPUB" mimetype` prints exactly `application/epub+zip` (the EPUB 3 mimetype-first invariant).
+- `unzip -l` lists `META-INF/container.xml` and `EPUB/content.opf` (the EPUB 3 manifest scaffolding).
+- Visual / encoding check: extracting the first chapter's XHTML and grepping for Hungarian accented characters (ő, ű, á, é, í, ó, ú) returns at least a handful of hits when telex.hu was one of the sources. The reMarkable EPUB reader picks fonts itself, so font coverage is no longer renewsable's responsibility — the test is just that the source bytes survived intact, not how they render.
 
 On failure:
-- `BuildError: all feeds failed` → network or feed-side outage; re-run. Per-feed failures are logged but tolerated as long as at least one feed yields stories.
-- Missing fonts for Hungarian glyphs → re-run `./scripts/install-pi.sh`; it ensures DejaVu and Noto Core are installed.
+- `BuildError: no usable articles produced from any source` → network or feed-side outage; re-run. Per-feed failures are logged but tolerated as long as at least one feed yields stories.
+- `unzip` reports `not a zipfile` → the EPUB validator (`Builder._validate_epub`) should have caught this and raised `BuildError` before writing; if a malformed EPUB nonetheless landed, capture `journalctl --user -u renewsable.service --since today` and the plain-text log for the build phase output.
 
 Evidence:
 
@@ -122,21 +127,27 @@ Evidence:
 # paste: `ls -la ~/.local/state/renewsable/out/`
 
 
-# paste: `stat` output for today's PDF
+# paste: `stat` output for today's EPUB
 
 
-# paste: first line of `xxd "$PDF" | head -1`  (must start with `25504446 2d`)
+# paste: first line of `xxd "$EPUB" | head -1`  (must start with `504b 0304`)
 
 
-# note: "Hungarian accents rendered correctly: YES / NO"
+# paste: `unzip -p "$EPUB" mimetype`  (must print application/epub+zip)
+
+
+# paste: grep output for Hungarian accents in chapters/article-001.xhtml
+
+
+# note: "Hungarian source bytes preserved: YES / NO"
 
 ```
 
 ---
 
-## 4. Upload only — PDF appears on the reMarkable cloud
+## 4. Upload only — EPUB appears on the reMarkable cloud
 
-**Goal:** push the just-built PDF to the `/News/` folder on the reMarkable cloud and confirm via `rmapi ls`.
+**Goal:** push the just-built EPUB to the `/News/` folder on the reMarkable cloud and confirm via `rmapi ls`.
 
 Commands:
 
@@ -148,9 +159,9 @@ $ rmapi ls /News
 ```
 
 Success criteria:
-- `renewsable … upload` exits 0. Log contains `upload complete` (or equivalent) with the target path `/News/renewsable-YYYY-MM-DD-rm2`.
-- `rmapi ls /News` lists an entry `renewsable-YYYY-MM-DD-rm2` (name only; `rmapi` does not display the `.pdf` suffix for uploaded PDFs — they appear as documents).
-- On the tablet itself (after a cloud sync), the document is visible in the **News** folder.
+- `renewsable … upload` exits 0. Log contains `upload complete` (or equivalent) with the target path `/News/renewsable-YYYY-MM-DD`.
+- `rmapi ls /News` lists an entry `renewsable-YYYY-MM-DD` (name only; `rmapi` does not display the `.epub` suffix for uploaded EPUBs — they appear as documents).
+- On the tablet itself (after a cloud sync), the document is visible in the **News** folder and opens as a reflowable EPUB.
 
 On failure:
 - "paired device was removed" → token was revoked cloud-side. `renewsable pair --force` and retry.
@@ -183,7 +194,7 @@ $ echo "exit=$?"
 
 Success criteria:
 - Exits 0.
-- Both a new local PDF (same name, overwritten in place) and a new/updated `/News/renewsable-YYYY-MM-DD-rm2` on the cloud. Re-uploading is fine — the upload uses `rmapi put --force`.
+- Both a new local EPUB (same name, overwritten in place) and a new/updated `/News/renewsable-YYYY-MM-DD` on the cloud. Re-uploading is fine — the upload uses `rmapi put --force`.
 - Log output is concise (INFO-level only, no `DEBUG`), consistent with what will be written when the timer fires it.
 
 Evidence:
@@ -214,8 +225,8 @@ $ rmapi ls /News
 
 Success criteria:
 - Exits 0. Output is verbose (at least INFO-level; build phase, upload phase, and per-feed progress visible).
-- Local PDF at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD-rm2.pdf` is updated (mtime within the last minute).
-- `rmapi ls /News` still shows `renewsable-YYYY-MM-DD-rm2` (timestamp updated on the cloud side).
+- Local EPUB at `~/.local/state/renewsable/out/renewsable-YYYY-MM-DD.epub` is updated (mtime within the last minute).
+- `rmapi ls /News` still shows `renewsable-YYYY-MM-DD` (timestamp updated on the cloud side).
 
 Evidence:
 
@@ -226,7 +237,7 @@ Evidence:
 # paste: `rmapi ls /News`
 
 
-# paste: `ls -la --time=modification ~/.local/state/renewsable/out/renewsable-*.pdf`
+# paste: `ls -la --time=modification ~/.local/state/renewsable/out/renewsable-*.epub`
 
 ```
 
@@ -291,7 +302,7 @@ Success criteria for 7b:
 - `journalctl` output shows a run that started at `NEW_TIME` (±60 s), progressed through build + upload, and ended with `Main process exited, code=exited, status=0/SUCCESS` (or equivalent) — i.e. service exit code 0. (Req 5.1, 5.3, 5.4.)
 - `ExecMainStatus=0` and `Result=success`.
 - `~/.local/state/renewsable/logs/renewsable.log` contains the same run — dated records with the matching timestamp, covering build and upload, with no stray credentials or one-time codes in the text. (Req 8.1, 8.2.)
-- A matching PDF appears on the reMarkable cloud under `/News/`: `rmapi ls /News`.
+- A matching EPUB appears on the reMarkable cloud under `/News/`: `rmapi ls /News`.
 
 On failure:
 - Timer did not fire → check `loginctl show-user $USER -p Linger` (see step 8). If `Linger=no`, the user session is gone and the timer is inert.
@@ -374,58 +385,13 @@ Evidence:
 
 | Requirement | Covered by step(s) |
 |-------------|--------------------|
-| 3.2 — PDF with correct non-ASCII (Hungarian) rendering | 3 |
+| 3.2 — EPUB preserves non-ASCII (Hungarian) source bytes | 3 |
 | 5.1 — systemd user timer installed and enabled | 7a, 8 |
 | 5.3 — timer fires at the configured wall-clock time | 7b |
 | 5.4 — service run succeeds end-to-end under the timer | 7b |
 | 6.5 — `test-pipeline` end-to-end entry point works | 6 |
 | 8.1 — plain-text log file captures runs | 7b |
 | 8.2 — log file and journald agree on the same run | 7b |
-
-## 9. Multi-profile run — two PDFs from one invocation
-
-**Goal:** verify the `device-profiles` spec — a single scheduled run produces one PDF per configured profile and each lands in its own reMarkable folder.
-
-Setup a temp config that declares both built-in profiles with distinct destination folders. `paper_pro_move` gets its own folder so the two files don't collide on the tablet:
-
-```bash
-$ TODAY=$(date +%Y-%m-%d)
-$ cp config/config.example.json /tmp/renewsable-multiprofile.json
-$ python3 - <<'PY'
-import json, pathlib
-p = pathlib.Path('/tmp/renewsable-multiprofile.json')
-cfg = json.loads(p.read_text())
-cfg['device_profiles'] = [
-    {'name': 'rm2'},
-    {'name': 'paper_pro_move', 'remarkable_folder': '/News-Move'},
-]
-p.write_text(json.dumps(cfg, indent=2))
-PY
-$ renewsable --config /tmp/renewsable-multiprofile.json test-pipeline
-$ ls -la ~/.local/state/renewsable/out/renewsable-${TODAY}-*.pdf
-$ rmapi ls /News
-$ rmapi ls /News-Move
-```
-
-Success criteria:
-- `renewsable … test-pipeline` exits 0 and logs a `build ok` / `upload ok` line for **both** `rm2` and `paper_pro_move`.
-- Two local PDFs exist: `renewsable-${TODAY}-rm2.pdf` and `renewsable-${TODAY}-paper_pro_move.pdf`.
-- `rmapi ls /News` lists a `renewsable-YYYY-MM-DD-rm2` entry.
-- `rmapi ls /News-Move` lists a `renewsable-YYYY-MM-DD-paper_pro_move` entry.
-- If one profile's build failed and the other succeeded, the command exits 1 and the failed profile's reason appears in stderr; the successful profile's PDF still lands. (Trigger by temporarily corrupting one feed URL.)
-
-Evidence:
-```
-# paste: output of `ls -la ~/.local/state/renewsable/out/renewsable-${TODAY}-*.pdf`
-# paste: output of `rmapi ls /News | grep ${TODAY}`
-# paste: output of `rmapi ls /News-Move | grep ${TODAY}`
-```
-
-On failure:
-- Check `journalctl --user -u renewsable.service --since "5 minutes ago"` and the plain-text log for the failing profile's reason.
-- If the `/News-Move` folder was not auto-created, verify the Uploader's `rmapi mkdir` step ran (`grep mkdir` in the log).
-
----
 
 ## Sign-off
 
