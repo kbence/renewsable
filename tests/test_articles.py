@@ -767,3 +767,107 @@ def test_img_width_and_height_preserved() -> None:
 
     assert 'width="320"' in out
     assert 'height="240"' in out
+
+
+# ---------------------------------------------------------------------------
+# GH #11: duplicate title <h1> stripping
+# ---------------------------------------------------------------------------
+
+
+def _h1_count(html: str) -> int:
+    """Count `<h1` opening-tag occurrences case-insensitively."""
+    return html.lower().count("<h1")
+
+
+def test_duplicate_title_h1_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GH #11: an <h1> in the article body whose text matches the entry title is removed."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    title = "Same Title Across Both"
+    article_html = (
+        "<html><body><article>"
+        f"<h1>{title}</h1>"
+        + ("<p>Plenty of body content that readability and trafilatura will both pick up. " * 8)
+        + "</p></article></body></html>"
+    )
+
+    feed = _FakeFeed([{"title": title, "link": art_url, "summary": "rss"}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert _h1_count(out[0].html) == 0, (
+        f"expected zero <h1> in Article.html after dedup, got: {out[0].html[:300]!r}"
+    )
+    assert "body content" in out[0].html
+
+
+def test_differing_h1_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GH #11: an <h1> whose text differs from the article title is preserved."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    article_html = (
+        "<html><body><article>"
+        "<h1>A Different Headline From The Title</h1>"
+        + ("<p>Plenty of body content. " * 8)
+        + "</p></article></body></html>"
+    )
+
+    feed = _FakeFeed([{"title": "Original RSS Entry Title", "link": art_url, "summary": "x"}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert "A Different Headline From The Title" in out[0].html
+    assert _h1_count(out[0].html) == 1
+
+
+def test_h1_match_is_whitespace_and_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GH #11: trivial whitespace/case differences between title and <h1> still trigger the strip."""
+    feed_bytes = b"<rss/>"
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/article"
+    article_html = (
+        "<html><body><article>"
+        "<h1>  SAME   title   ACROSS\nBOTH  </h1>"
+        + ("<p>body content. " * 8)
+        + "</p></article></body></html>"
+    )
+
+    feed = _FakeFeed([{"title": "Same Title Across Both", "link": art_url, "summary": "x"}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+
+    out = collect([_story(rss_url)], ua="ua", retries=1, backoff_s=0.01, robots_cache={})
+
+    assert len(out) == 1
+    assert _h1_count(out[0].html) == 0
+
+
+def test_no_h1_in_body_passes_through_unchanged() -> None:
+    """GH #11: when the body has no <h1>, the helper is a no-op."""
+    body = "<div><p>just body text, no heading</p></div>"
+    out = articles_mod._strip_duplicate_title_h1(body, "Some Title")
+    assert out == body
+
+
+def test_strip_duplicate_h1_with_empty_title_is_noop() -> None:
+    """Defensive: empty/None title must not strip anything."""
+    body = "<div><h1>Some Heading</h1><p>body</p></div>"
+    assert articles_mod._strip_duplicate_title_h1(body, "") == body
+    assert articles_mod._strip_duplicate_title_h1(body, "   ") == body
