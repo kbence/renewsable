@@ -1,0 +1,22 @@
+{
+  "feature_name": "trafilatura-extractor",
+  "created_at": "2026-05-01T04:22:25Z",
+  "updated_at": "2026-05-01T04:22:25Z",
+  "language": "en",
+  "phase": "initialized",
+  "approvals": {
+    "requirements": {
+      "generated": false,
+      "approved": false
+    },
+    "design": {
+      "generated": false,
+      "approved": false
+    },
+    "tasks": {
+      "generated": false,
+      "approved": false
+    }
+  },
+  "ready_for_implementation": false
+}
