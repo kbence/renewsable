@@ -95,3 +95,43 @@ bash -n scripts/install-pi.sh                       # syntax check
 ./scripts/install-pi.sh                             # on macOS: must exit 1
 command -v shellcheck && shellcheck scripts/install-pi.sh   # if installed
 ```
+
+## `install-mac.sh` — rmapi fetch policy
+
+The macOS bootstrap (`scripts/install-mac.sh`) takes a deliberately
+different approach to obtaining `rmapi` than the Pi script does. It
+downloads the **latest** upstream release via the GitHub redirect URL:
+
+```
+https://github.com/ddvk/rmapi/releases/latest/download/<asset>
+```
+
+The asset is selected from `uname -m`:
+
+| `uname -m` | Asset                    | Host             |
+|------------|--------------------------|------------------|
+| `arm64`    | `rmapi-macos-arm64.zip`  | Apple Silicon    |
+| `x86_64`   | `rmapi-macos-intel.zip`  | Intel Mac        |
+
+There is **no version pin and no SHA-256 pin** on the macOS path. After
+extracting the binary into `.venv/bin/rmapi`, the script defensively runs
+`xattr -d com.apple.quarantine` on it (suppressing failure when the
+attribute is absent) so an unsigned/unnotarized `rmapi` is not blocked by
+Gatekeeper at first run. If a maintainer ever changes the install path or
+swaps `curl` for another download tool, that quarantine-clear step must
+continue to run.
+
+**Rationale.** The Pi-side `v0.0.32` pin is broken in production today —
+it triggers the sync-v3 `invalid hash` failure against the live
+reMarkable cloud, which upstream fixed in `v0.0.33`. For a one-operator
+project, getting stuck on a known-bad pinned binary has historically been
+a higher-impact failure mode than a tampered upstream release. Trading
+tamper detection (low-impact for a single operator pulling over HTTPS
+from a TLS-pinned GitHub release URL) for resilience to broken pins is
+the correct call here.
+
+This policy **differs from `install-pi.sh`**, which still pins
+`RMAPI_VERSION` and `RMAPI_SHA256`. Bumping or dropping the Pi pin is a
+separate concern with its own validation surface (the Pi is the
+production path) and is **not delivered by this spec**. It is recorded
+as a known follow-up.

@@ -46,7 +46,7 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
   - _Boundary: README.md_
 
-- [ ] 4.2 (P) Document the macOS rmapi-fetch policy and fix the stale Pi-script comment
+- [x] 4.2 (P) Document the macOS rmapi-fetch policy and fix the stale Pi-script comment
   - Append a paragraph to `scripts/README.md` documenting the macOS rmapi-fetch policy: latest release via `https://github.com/ddvk/rmapi/releases/latest/download/<asset>`, asset chosen from `uname -m` (`rmapi-macos-arm64.zip` for Apple Silicon, `rmapi-macos-intel.zip` for Intel), no version or SHA-256 pin, plus the defensive `xattr -d com.apple.quarantine` step
   - Capture the rationale for skipping the pin: the Pi-side `v0.0.32` pin is broken in production today (sync-v3 invalid hash, fixed upstream in `v0.0.33`); for a one-operator project, getting stuck on a known-bad pinned binary has historically been a higher-impact failure mode than upstream tampering
   - State explicitly that this differs from the Pi script's policy (which still pins) and that bumping or dropping the Pi pin is a separate concern not delivered by this spec

@@ -23,6 +23,9 @@ set -euo pipefail
 
 # --- Pinned versions ---------------------------------------------------------
 # rmapi release to install. Bump here when updating; also refresh the SHA-256.
+# Maintainer note: the macOS counterpart lives in scripts/install-mac.sh and
+# intentionally uses a different fetch policy (Mac: latest release, no pin;
+# Pi: pinned version + SHA-256). See scripts/README.md for the rationale.
 RMAPI_VERSION="v0.0.32"
 RMAPI_TAR="rmapi-linux-arm64.tar.gz"
 RMAPI_URL="https://github.com/ddvk/rmapi/releases/download/${RMAPI_VERSION}/${RMAPI_TAR}"
@@ -47,7 +50,9 @@ if [ ! -f "pyproject.toml" ] || [ ! -d "src/renewsable" ]; then
 fi
 
 # --- 2. Sanity: must be Linux on aarch64 (Raspberry Pi OS 64-bit) ------------
-# The ddvk/rmapi project only ships linux-amd64 and linux-arm64 binaries.
+# The ddvk/rmapi project ships Linux, macOS, and Windows binaries today; this
+# script only targets the linux-arm64 asset because Raspberry Pi OS is the
+# only host it provisions (see scripts/install-mac.sh for the macOS path).
 # Raspberry Pi OS reports the 64-bit kernel as `aarch64`; the 32-bit image
 # reports `armv7l` / `armhf` and is explicitly unsupported by this script.
 # On a macOS dev box `uname -s` is `Darwin`, so the kernel check fails first
