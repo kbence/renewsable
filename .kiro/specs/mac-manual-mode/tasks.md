@@ -27,11 +27,12 @@
   - _Depends: 2.1_
 
 - [ ] 3. (P) macOS bootstrap script
-  - Implement an idempotent macOS Apple Silicon bootstrap shell script that mirrors the Pi bootstrap shape but: rejects non-Darwin or non-arm64 hosts with a platform-naming guidance message and exits non-zero without modifying the working directory; verifies the operator has Python 3.11 or newer on PATH and exits with a Homebrew-pointing remediation otherwise; creates a project-local virtualenv when absent and reuses it when present; installs renewsable in editable mode with dev extras into that venv; downloads the pinned ddvk/rmapi macos-arm64 zip via curl; verifies the download against an embedded SHA-256 constant via shasum -a 256 -c; on mismatch aborts before installing the binary and prints both the expected checksum and the offending archive name; extracts the verified zip via unzip; installs the rmapi executable into the venv's bin directory with mode 0755; defensively clears the macOS quarantine xattr on the installed binary so first-run Gatekeeper does not block pairing; smoke-tests both the renewsable entrypoint and the rmapi binary; prints a next-steps banner that explicitly notes no scheduler is installed
-  - The script must use only macOS-shipped tools (bash 3.2 compatible, curl, unzip, shasum, install, mktemp, xattr, python3) and must not invoke apt, sudo, or brew
+  - Implement an idempotent macOS bootstrap shell script that supports both Apple Silicon and Intel Macs and mirrors the Pi bootstrap shape but: rejects non-Darwin hosts with a platform-naming guidance message and exits non-zero without modifying the working directory; resolves the host architecture from `uname -m` to `arm64` or `x86_64` and refuses any other value on Darwin with an unsupported-architecture message; verifies the operator has Python 3.11 or newer on PATH and exits with a Homebrew-pointing remediation otherwise; creates a project-local virtualenv when absent and reuses it when present; installs renewsable in editable mode with dev extras into that venv; downloads the latest `ddvk/rmapi` macOS asset matching the resolved architecture (`rmapi-macos-arm64.zip` for Apple Silicon, `rmapi-macos-intel.zip` for Intel) from the GitHub `releases/latest/download/<asset>` URL pattern; on download or extraction failure aborts before installing the binary and prints a message naming the source URL or extraction target; extracts the zip via `unzip`; installs the rmapi executable into the venv's bin directory with mode 0755; defensively clears the macOS quarantine xattr on the installed binary so first-run Gatekeeper does not block pairing; smoke-tests both the renewsable entrypoint and the rmapi binary; prints a next-steps banner that explicitly notes no scheduler is installed
+  - The script must use only macOS-shipped tools (bash 3.2 compatible, curl, unzip, install, mktemp, xattr, uname, python3) and must not invoke apt, sudo, or brew
+  - **No version pin and no SHA-256 pin** for the rmapi download. The script trusts the upstream release; this is a deliberate decision capturing the reviewer's input that pinning has historically failed (the Pi-side `v0.0.32` pin is broken in production today against the live reMarkable cloud) and that for a single-operator project, getting stuck on a known-bad pinned binary is the higher-impact failure mode. The rationale is recorded in `research.md` and `scripts/README.md` (Task 4.2).
   - Re-running the script on a fully bootstrapped host completes successfully without redownloading the rmapi archive or recreating the venv; the quarantine-clear step is re-run defensively in this branch
-  - Compute the embedded SHA-256 constant by running shasum -a 256 against the v0.0.32 macos-arm64 release asset at script-write time, matching the Pi script's rmapi version pin for cross-platform parity
-  - Observable: on a clean Apple Silicon Mac, running the script exits 0 and the venv's renewsable command responds to --help; on any non-Apple-Silicon host the script exits non-zero with a platform-naming message and does not create a venv; re-running on a fully bootstrapped host completes within seconds without network calls
+  - Asset name resolution lives in a single `case "$ARCH" in ... ;; esac` block; this is the only place upstream asset names appear in the script
+  - Observable: on a clean Apple Silicon Mac, running the script exits 0 and the venv's renewsable command responds to --help, and the script downloaded `rmapi-macos-arm64.zip`; on a clean Intel Mac the same is true and the script downloaded `rmapi-macos-intel.zip`; on any non-Darwin host the script exits non-zero with a platform-naming message and does not create a venv; re-running on a fully bootstrapped host completes within seconds without network calls
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
   - _Boundary: scripts/install-mac.sh_
 
@@ -45,22 +46,25 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
   - _Boundary: README.md_
 
-- [ ] 4.2 (P) Document the macOS rmapi pin and add a cross-script bump reminder
-  - Append a paragraph to the scripts README documenting the macOS rmapi pin: version, archive filename, embedded SHA-256, the bump procedure via shasum -a 256, and the defensive quarantine-clear note
-  - State explicitly in that paragraph that the Pi and Mac rmapi pins should bump in lockstep
-  - Add a one-line maintainer comment near the rmapi version block of the Pi bootstrap script pointing readers at the macOS bootstrap script for the corresponding pin (no behavior change to the Pi script)
-  - Observable: a maintainer reading either bootstrap script sees the cross-reference; the scripts README documents both pins side by side and includes the macOS bump procedure and the quarantine-clear caveat
+- [ ] 4.2 (P) Document the macOS rmapi-fetch policy and fix the stale Pi-script comment
+  - Append a paragraph to `scripts/README.md` documenting the macOS rmapi-fetch policy: latest release via `https://github.com/ddvk/rmapi/releases/latest/download/<asset>`, asset chosen from `uname -m` (`rmapi-macos-arm64.zip` for Apple Silicon, `rmapi-macos-intel.zip` for Intel), no version or SHA-256 pin, plus the defensive `xattr -d com.apple.quarantine` step
+  - Capture the rationale for skipping the pin: the Pi-side `v0.0.32` pin is broken in production today (sync-v3 invalid hash, fixed upstream in `v0.0.33`); for a one-operator project, getting stuck on a known-bad pinned binary has historically been a higher-impact failure mode than upstream tampering
+  - State explicitly that this differs from the Pi script's policy (which still pins) and that bumping or dropping the Pi pin is a separate concern not delivered by this spec
+  - Replace the stale "ships only linux binaries" claim in `scripts/install-pi.sh`'s host-check comment with an accurate one-line summary noting upstream ships Linux, macOS, and Windows binaries today
+  - Add a one-line maintainer comment near the rmapi version block of `scripts/install-pi.sh` pointing readers at `scripts/install-mac.sh` for the macOS counterpart, with a note that the two scripts intentionally use different fetch policies (Mac: latest; Pi: pinned) — no behavior change to the Pi script
+  - Observable: a maintainer reading either bootstrap script sees the cross-reference and the corrected platform-coverage comment; `scripts/README.md` documents the macOS fetch policy, the rationale, and how it differs from the Pi pinning policy
   - _Requirements: 1.2, 1.3_
   - _Boundary: scripts/README.md and scripts/install-pi.sh_
 
 - [ ] 5. Validation
-- [ ] 5.1 End-to-end verification on macOS Apple Silicon hardware
-  - Run the macOS bootstrap on a clean Apple Silicon Mac and confirm it succeeds; immediately re-run it and confirm idempotency (no redownload, no venv recreation, exit 0)
+- [ ] 5.1 End-to-end verification on macOS hardware
+  - Run the macOS bootstrap on a clean Apple Silicon Mac and confirm it succeeds; immediately re-run it and confirm idempotency (no redownload, no venv recreation, exit 0); confirm the script resolved `arm64` from `uname -m` and downloaded `rmapi-macos-arm64.zip`
+  - If an Intel Mac is available (opportunistic), run the same walk on it and confirm the script resolved `x86_64` and downloaded `rmapi-macos-intel.zip`. Treat Intel coverage as best-effort given the project's primary operator targets Apple Silicon
   - Run renewsable pair, complete the reMarkable cloud pairing flow with a real one-time code, and confirm a non-empty token file is written at the user's rmapi configuration path
   - Run renewsable test-pipeline against the example config and confirm a dated EPUB appears both in the configured output directory and in the configured reMarkable folder
   - Run renewsable install-schedule and renewsable uninstall-schedule on the Mac; confirm both exit non-zero with a message that names the manual entrypoints, and that no LaunchAgents plist, no launchctl invocation, and no other host-scheduler state is touched
-  - Observable: all four checks succeed on real hardware; any failure is a hard stop before merge
-  - _Requirements: 1.1, 1.5, 2.1, 2.2, 3.1, 3.2, 3.3_
+  - Observable: all checks succeed on Apple Silicon real hardware; any Apple Silicon failure is a hard stop before merge; Intel-Mac coverage is recorded if attempted but not blocking
+  - _Requirements: 1.1, 1.2, 1.5, 2.1, 2.2, 3.1, 3.2, 3.3_
 
 - [ ] 5.2 Pi non-regression verification
   - On a Raspberry Pi running Pi OS Bookworm 64-bit (or the existing production Pi), check out this branch and run pip install -e . inside the existing venv

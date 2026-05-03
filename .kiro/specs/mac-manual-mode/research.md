@@ -141,3 +141,49 @@ Add a "Choose your install path" intro before either runbook, branching to Pi (p
 - **R1**: Confirm `v0.0.32` rmapi pin and compute the SHA-256 of `rmapi-macos-arm64.zip` (one shell command at design/implementation time; no actual research).
 - **R2**: Decide the Python-version check copy in `install-mac.sh` (point users at `brew install python@3.11` or just `python@3.12`?). Low-stakes wording call.
 - **R3**: Decide whether to add `MAC_VERIFICATION.md` now or defer (default: defer; the README walkthrough is sufficient for the spec).
+
+---
+
+# Addendum — Reviewer feedback on PR #13: drop the rmapi pin
+
+## Context
+
+PR #13 (the spec's first cut) drew five review comments on the rmapi-pinning approach. This addendum captures the resulting design pivot and supersedes the relevant earlier sections.
+
+## What the reviewer said (in summary)
+
+1. The Pi-side `v0.0.32` pin is broken in production today — it caused the sync-v3 `invalid hash` 400 closed in issue #7. Upstream `v0.0.33` fixes it.
+2. Pinning trades tampering protection (which is low-impact for a one-Pi, one-operator project) for being stuck on a known-bad binary (which has now happened, demonstrably).
+3. With the pin dropped, `uname` can drive arch detection and Intel Mac falls in for free at the cost of one extra `case` branch — the dual-pin avoidance was the only reason Intel was excluded in the original out-of-scope list.
+4. The host-check comment in `install-pi.sh:50` claiming "ships only linux binaries" is stale — upstream ships `linux-amd64`, `linux-arm64`, `macos-arm64`, `macos-intel`, `win-arm64`, `win64`. Same diff (Task 4.2) can fix it.
+5. The reviewer (project owner) is "ok with pinning" but explicitly notes the current pin is broken; preference is to drop the pin or at minimum bump it.
+
+## Decision
+
+**Drop the rmapi version pin and the SHA-256 pin in the new `install-mac.sh`.** Fetch the latest release via the GitHub `releases/latest/download/<asset>` URL pattern, with the asset chosen from `uname -m`:
+
+| `uname -m` | Asset |
+|---|---|
+| `arm64` | `rmapi-macos-arm64.zip` |
+| `x86_64` | `rmapi-macos-intel.zip` |
+
+This automatically supports both Apple Silicon and Intel Macs.
+
+**Do NOT touch the Pi-side `install-pi.sh` rmapi pin in this spec.** That is a separate change with its own validation surface (the Pi is the production path, regression risk is real). The Pi pin is `v0.0.32` and is broken against the live cloud today; bumping it to `v0.0.33` (or dropping it) is recorded here as a known follow-up.
+
+## Tradeoffs accepted
+
+- **No tamper detection** on the macOS rmapi download. Mitigations: the upstream URL is HTTPS; the asset is signed by GitHub's TLS chain; the operator runs the bootstrap interactively and could compare the downloaded binary's checksum against the GitHub release page if concerned. For a single-operator project, the reviewer judged this acceptable.
+- **No version determinism**: two operators bootstrapping on different days may end up with different rmapi versions. Mitigation: in practice both will get whatever upstream considers stable; if a specific behavior is needed the operator can manually pin by setting `rmapi_bin` in their config to a path they manage.
+- **Intel Mac coverage is now in scope but opportunistic**: the design lists `x86_64` as supported, but the project's primary operator targets Apple Silicon. Intel manual verification is best-effort, not blocking (Task 5.1).
+
+## What this addendum supersedes
+
+- The earlier "Pin choice" research item (R1) — there is no pin to choose. R1 is closed.
+- The earlier `Tech Stack` row claiming `ddvk/rmapi v0.0.32 (rmapi-macos-arm64.zip)` and an embedded SHA-256 — design.md has been updated to reflect the unpinned policy.
+- The earlier "Out of scope: Intel Mac" boundary commitment — Intel Mac is now in scope. Requirements 1.1–1.5 have been updated accordingly.
+- The earlier "Pi/Mac pins should bump in lockstep" cross-reference comment in `install-pi.sh` — replaced with a comment noting the two scripts have intentionally different fetch policies.
+
+## Known follow-up not delivered by this spec
+
+- **Pi pin is broken today (`v0.0.32`)**. Recommended action: in a separate small change, either bump the Pi pin to `v0.0.33` (one-line + SHA recompute) or drop the Pi pin entirely to match the macOS policy. This spec deliberately does not bundle that change to keep the blast radius scoped.

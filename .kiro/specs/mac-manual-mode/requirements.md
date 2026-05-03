@@ -2,23 +2,24 @@
 
 ## Introduction
 
-Renewsable today supports exactly one install path: a Raspberry Pi running Pi OS Bookworm 64-bit, with a `systemd --user` timer firing the daily build-and-upload pipeline at a configured wall-clock time. This spec adds a parallel install and usage path for an Apple Silicon macOS workstation, scoped explicitly as a manual mode: the operator runs `renewsable run` themselves whenever they want a digest, and there is no scheduler equivalent. The Pi path remains the supported production path and is unchanged.
+Renewsable today supports exactly one install path: a Raspberry Pi running Pi OS Bookworm 64-bit, with a `systemd --user` timer firing the daily build-and-upload pipeline at a configured wall-clock time. This spec adds a parallel install and usage path for a macOS workstation (both Apple Silicon and Intel), scoped explicitly as a manual mode: the operator runs `renewsable run` themselves whenever they want a digest, and there is no scheduler equivalent. The Pi path remains the supported production path and is unchanged.
 
 ## Boundary Context
 
 - **In scope**:
-  - A macOS bootstrap script that prepares an Apple Silicon Mac (Darwin / arm64) to run renewsable end-to-end, parallel in shape to the existing Pi bootstrap.
+  - A macOS bootstrap script that prepares a macOS host (Darwin, both `arm64` and `x86_64`) to run renewsable end-to-end, parallel in shape to the existing Pi bootstrap.
   - Cross-platform behavior in the existing `install-schedule` and `uninstall-schedule` commands so they fail fast on macOS instead of attempting a Linux-only scheduler.
   - README documentation for the macOS manual workflow as a peer of the existing Pi runbook.
+  - A one-word fix to the stale "linux only" claim in the Pi bootstrap script's host-check comment (the upstream `ddvk/rmapi` releases ship macOS and Windows binaries too).
 - **Out of scope**:
   - Any scheduled execution on macOS (`launchd`, `cron`, or anything else). The mode is manual by design.
-  - Intel Mac (Darwin / x86_64) support. Restricted to Apple Silicon to avoid pinning a second `rmapi` artifact.
   - Any change to the build, upload, or pairing pipeline behavior. These components are already cross-platform and are reused unchanged.
-  - Any change to the existing Pi bootstrap script, the systemd user timer, or `install-schedule` / `uninstall-schedule` behavior on Linux.
+  - Any change to the Linux scheduler behavior (`install-schedule` / `uninstall-schedule` on Linux), the systemd user timer, or the install-pi.sh bootstrap beyond the stale-comment fix and a one-line cross-reference comment pointing maintainers at install-mac.sh.
+  - Bumping or dropping the Pi-side `rmapi` version pin. The Pi pin is currently `v0.0.32`, which is known broken against the live reMarkable cloud (sync-v3 invalid hash, fixed in `v0.0.33`); fixing the Pi pin is recorded in `research.md` as a follow-up but is not delivered by this spec.
 - **Adjacent expectations**:
   - The `renewsable pair` command is already cross-platform: it spawns `rmapi` and persists a device token at `~/.config/rmapi/rmapi.conf`. The macOS path reuses this flow as-is and does not own its persistence behavior.
   - The reMarkable cloud target folder, EPUB output filename, and configuration schema are owned by the existing `epub-output` and `daily-paper` specs and are unaffected.
-  - Architecture detection in the macOS bootstrap script is symmetric to the existing Pi bootstrap: each refuses hosts the other targets.
+  - The macOS bootstrap script downloads the latest `ddvk/rmapi` release matching the host architecture rather than pinning a specific version. This trades reproducibility and tamper detection for resilience to broken pinned binaries (see `research.md` for the decision and tradeoffs).
 
 ## Requirements
 
@@ -28,11 +29,11 @@ Renewsable today supports exactly one install path: a Raspberry Pi running Pi OS
 
 #### Acceptance Criteria
 
-1. When the operator runs the macOS bootstrap script on a Darwin / arm64 host, the macOS bootstrap script shall create a project-local Python virtual environment and install renewsable with its development dependencies in editable mode into that environment.
-2. When the operator runs the macOS bootstrap script on a Darwin / arm64 host, the macOS bootstrap script shall download a pinned `ddvk/rmapi` darwin-arm64 release archive, verify the archive against an embedded SHA-256 checksum, and place an executable `rmapi` binary inside the project-local venv's `bin` directory.
-3. If the downloaded `rmapi` archive's SHA-256 checksum does not match the pinned value, then the macOS bootstrap script shall abort without installing the binary and shall print a message that names the expected checksum and the offending archive.
-4. If the operator runs the macOS bootstrap script on a host that is not Darwin / arm64, then the macOS bootstrap script shall exit non-zero without modifying the working directory and shall print a message that names the detected platform and states that only Apple Silicon macOS is supported.
-5. When the operator re-runs the macOS bootstrap script on a host where the venv and the pinned `rmapi` binary already exist, the macOS bootstrap script shall complete successfully without re-downloading the `rmapi` archive and without recreating the venv.
+1. When the operator runs the macOS bootstrap script on a Darwin host (either `arm64` or `x86_64`), the macOS bootstrap script shall create a project-local Python virtual environment and install renewsable with its development dependencies in editable mode into that environment.
+2. When the operator runs the macOS bootstrap script on a Darwin host, the macOS bootstrap script shall detect the host architecture, download the latest `ddvk/rmapi` macOS release asset matching that architecture, and place an executable `rmapi` binary inside the project-local venv's `bin` directory.
+3. If the `rmapi` archive download or extraction fails, then the macOS bootstrap script shall abort without installing the binary and shall print a message that names the failed step and the source URL or extraction target.
+4. If the operator runs the macOS bootstrap script on a host that is not Darwin (either architecture), then the macOS bootstrap script shall exit non-zero without modifying the working directory and shall print a message that names the detected platform and states that only macOS is supported.
+5. When the operator re-runs the macOS bootstrap script on a host where the venv and the `rmapi` binary already exist, the macOS bootstrap script shall complete successfully without re-downloading the `rmapi` archive and without recreating the venv.
 6. The macOS bootstrap script shall not invoke `apt-get`, `sudo`, or any Linux package manager.
 
 ### Requirement 2: Scheduler commands fail fast on macOS
