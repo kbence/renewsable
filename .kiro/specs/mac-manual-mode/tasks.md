@@ -18,7 +18,7 @@
   - _Depends: 1.1_
   - _Boundary: Scheduler_
 
-- [ ] 2.2 Add unit tests covering install, uninstall, and status refusal on Darwin
+- [x] 2.2 Add unit tests covering install, uninstall, and status refusal on Darwin
   - Three new test cases, one each for install, uninstall, and status, that override the autouse fixture inline by setting the scheduler-side platform alias to "darwin", patch a recording subprocess fake, and exercise the corresponding method
   - Each test asserts the method raises ScheduleError, the message text names "renewsable run" and "renewsable test-pipeline", and the recording subprocess fake never recorded a call
   - The status case is included even though status is not currently wired to a CLI command, to lock in the design's defensive symmetry decision and prevent a future regression from silently dropping the refusal call
