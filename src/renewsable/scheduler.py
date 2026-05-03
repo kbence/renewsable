@@ -30,6 +30,7 @@ Templates
 from __future__ import annotations
 
 import subprocess  # noqa: F401  (kept as module-level alias for tests)
+import sys  # noqa: F401  (kept as module-level alias for tests)
 from importlib.resources import files
 from pathlib import Path
 from string import Template

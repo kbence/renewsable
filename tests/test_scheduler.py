@@ -34,6 +34,31 @@ from renewsable.scheduler import Scheduler
 
 
 # ---------------------------------------------------------------------------
+# Autouse fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_scheduler_platform_to_linux(monkeypatch):
+    """Pin ``sched_mod.sys.platform`` to ``"linux"`` for every test.
+
+    The scheduler exposes ``sys`` as a module-level alias (mirroring the
+    existing ``subprocess`` alias) so platform-dependent branches can be
+    monkey-patched in tests. The macOS dev box reports
+    ``sys.platform == "darwin"``; without this fixture, any future
+    Darwin-refusal branch in the scheduler would short-circuit every
+    existing test on a Mac. Pinning the alias to ``"linux"`` keeps the
+    pre-existing test suite green regardless of the host kernel.
+
+    Tests that need to exercise the macOS path can override this fixture
+    inline by re-setting the same attribute, e.g.::
+
+        monkeypatch.setattr(sched_mod.sys, "platform", "darwin")
+    """
+    monkeypatch.setattr(sched_mod.sys, "platform", "linux")
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

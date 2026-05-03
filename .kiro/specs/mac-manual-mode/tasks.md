@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. Foundation: scheduler test seam
-- [ ] 1.1 Establish a sys.platform test seam and autouse linux fixture for the scheduler tests
+- [x] 1.1 Establish a sys.platform test seam and autouse linux fixture for the scheduler tests
   - Expose the standard library sys module as a module-level alias on the scheduler component so the platform value can be monkeypatched the same way the existing subprocess seam is
   - Add an autouse pytest fixture to the scheduler test module that pins the scheduler-side platform alias to "linux" before every test, so the existing scheduler test suite remains green on the macOS dev box once platform branches land
   - Observable: the existing scheduler test suite passes unchanged on the macOS dev box, and a downstream test can override the autouse fixture inline by setting the alias to "darwin"
