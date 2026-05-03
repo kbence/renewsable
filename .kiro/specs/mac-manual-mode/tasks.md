@@ -73,3 +73,11 @@
   - Run the full pytest suite on the Pi (or in a Linux container that matches the Pi runtime) and confirm zero failures
   - Observable: the Pi deployment behaves identically to before this spec, the daily timer continues to work end-to-end, and pytest reports zero failures
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
+
+- [x] 6. Make `paths.rmapi_config_path()` platform-aware (scope expansion forced by Task 5.1 verification)
+  - Surfaced live during Task 5.1 on a clean macOS host: `renewsable pair` failed with `no token at ~/.config/rmapi/rmapi.conf` even though rmapi v0.0.33 had successfully paired. Root cause: rmapi (Go) writes its config via `os.UserConfigDir()`, which is `~/Library/Application Support/rmapi/rmapi.conf` on macOS, not the XDG path `paths.rmapi_config_path()` was hardcoded to.
+  - Add a module-level `sys` alias on `paths.py` (same test seam pattern as `scheduler.sys`); make `rmapi_config_path()` honour `$RMAPI_CONFIG` first, then branch on `sys.platform == "darwin"` to return the Library/Application Support path, falling back to the existing XDG behavior on Linux/other.
+  - Tests: `TestRmapiConfigPathDarwin` (two cases — macOS uses Library/Application Support; macOS ignores `XDG_CONFIG_HOME`); `TestRmapiConfigPathOverride` (three cases — `$RMAPI_CONFIG` overrides on Linux, on Darwin, empty value falls back). Pin `paths.sys.platform = "linux"` via an autouse fixture so existing XDG-branch tests remain deterministic on the macOS dev box. Update `tests/test_pairing.py::xdg_tmp` to pin platform and clear `$RMAPI_CONFIG` so existing pairing tests stay green.
+  - Observable: on the macOS dev box, `renewsable --config config/config.example.json pair` exits 0 with `pairing complete` against the existing `~/Library/Application Support/rmapi/rmapi.conf`; full suite reports 255 passed (250 + 5 new path tests).
+  - _Requirements: 3.1_
+  - _Boundary: src/renewsable/paths.py, tests/test_paths.py, tests/test_pairing.py_

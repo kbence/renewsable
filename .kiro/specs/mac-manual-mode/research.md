@@ -187,3 +187,66 @@ This automatically supports both Apple Silicon and Intel Macs.
 ## Known follow-up not delivered by this spec
 
 - **Pi pin is broken today (`v0.0.32`)**. Recommended action: in a separate small change, either bump the Pi pin to `v0.0.33` (one-line + SHA recompute) or drop the Pi pin entirely to match the macOS policy. This spec deliberately does not bundle that change to keep the blast radius scoped.
+
+---
+
+# Addendum — Manual-verification finding (Task 5.1): rmapi config path is platform-specific
+
+## Incident
+
+During Task 5.1's interactive verification on a clean Apple Silicon Mac (macOS 26.4.1, rmapi v0.0.33 fetched live from `releases/latest`), `renewsable pair` consistently failed with:
+
+```
+rmapi exited without writing a token
+reMarkable pairing did not complete; no token at /Users/mihalykoles/.config/rmapi/rmapi.conf
+```
+
+…even though the rmapi binary itself had paired successfully and was responding headlessly to subsequent `rmapi account` and `rmapi find` calls.
+
+## Root cause
+
+`renewsable.paths.rmapi_config_path()` was hardcoded to the Linux/XDG convention (`$XDG_CONFIG_HOME/rmapi/rmapi.conf` else `~/.config/rmapi/rmapi.conf`). The ddvk fork of `rmapi` (Go) resolves its config location via `os.UserConfigDir()`, which on Darwin returns `$HOME/Library/Application Support/`. So:
+
+- rmapi wrote `~/Library/Application Support/rmapi/rmapi.conf` (1516 bytes, valid `devicetoken`).
+- `renewsable.Pairing.is_paired()` checked `~/.config/rmapi/rmapi.conf` (file does not exist) and returned False.
+- `Pairing.pair()` interpreted that as a failed pairing and raised `PairingError`.
+
+The bug was latent — the default Pi runbook never exposed it because Linux's `os.UserConfigDir()` and renewsable's hardcoded path agreed there. Manual macOS verification was the first thing to actually exercise the platform divergence.
+
+## Decision: scope expansion of mac-manual-mode
+
+Req 3.1 says `renewsable pair` must work on macOS and persist the token "at the standard `rmapi` configuration path so that subsequent commands run headlessly." The pre-spec `paths.rmapi_config_path()` cannot satisfy that requirement on macOS. Fixing it inside this spec — rather than deferring to a separate change — is the most honest path because:
+
+1. Without the fix, Req 3.1 is functionally broken on macOS even though every automated test passes (the existing tests only exercise the Linux branch).
+2. The fix is small (~6 lines + a regression test) and tightly scoped to `paths.py`.
+3. Deferring would require shipping `mac-manual-mode` with a known-broken pair flow on its target platform.
+
+`paths.py` is therefore moved out of "Out of Boundary" and added to "Modified Files" in design.md. `tests/test_paths.py` and `tests/test_pairing.py` get the same `sys.platform`-pinning autouse fixture pattern already established by `tests/test_scheduler.py` so the existing tests remain deterministic on the macOS dev box.
+
+## Fix shape
+
+```python
+def rmapi_config_path() -> Path:
+    override = os.environ.get("RMAPI_CONFIG", "")
+    if override:
+        return Path(override)
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "rmapi" / "rmapi.conf"
+    return _xdg_config_home() / "rmapi" / "rmapi.conf"
+```
+
+Resolution order mirrors what rmapi itself does:
+1. `$RMAPI_CONFIG` explicit override (any platform).
+2. macOS → `~/Library/Application Support/rmapi/rmapi.conf`.
+3. Linux/other → `$XDG_CONFIG_HOME/rmapi/rmapi.conf` else `~/.config/rmapi/rmapi.conf`.
+
+## Test coverage delta
+
+- `TestRmapiConfigPathDarwin`: macOS uses Library/Application Support; ignores `XDG_CONFIG_HOME`.
+- `TestRmapiConfigPathOverride`: `$RMAPI_CONFIG` overrides on Linux, on Darwin, and an empty value falls back to the platform default.
+- Existing `TestRmapiConfigPath` tests (XDG-branch) made deterministic via an autouse fixture that pins `paths.sys.platform = "linux"`.
+- `tests/test_pairing.py::xdg_tmp` updated to also pin platform and clear `$RMAPI_CONFIG` so existing pairing tests keep exercising the XDG branch on the macOS dev box.
+
+## Knock-on revalidation
+
+This spec's `Revalidation Triggers` includes "A change to the upstream `ddvk/rmapi` macOS asset filenames"; the same trigger should now also cover the rmapi binary changing its `os.UserConfigDir()` resolution (e.g., a Windows port adding a third platform branch). If rmapi ever stops respecting `$RMAPI_CONFIG`, both renewsable's override behavior and the `Pairing.is_paired()` detection would need re-checking.
