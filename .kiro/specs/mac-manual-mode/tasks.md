@@ -9,7 +9,7 @@
   - _Boundary: Scheduler module and its test module_
 
 - [ ] 2. Scheduler platform refusal
-- [ ] 2.1 Implement the macOS refusal helper and wire it into install, uninstall, and status
+- [x] 2.1 Implement the macOS refusal helper and wire it into install, uninstall, and status
   - Introduce a helper that raises a ScheduleError when the scheduler-side platform alias reports darwin, with remediation copy that names "renewsable run" and "renewsable test-pipeline" as the manual entrypoints
   - Call the helper as the first executable statement of install, uninstall, and status, before any subprocess invocation, unit-file write, or filesystem read
   - Linux behavior must remain bit-identical to the pre-spec implementation: no new branches in the happy path, no changes to template rendering, the systemctl helper, or the missing-unit detection
