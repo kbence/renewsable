@@ -37,7 +37,7 @@
   - _Boundary: scripts/install-mac.sh_
 
 - [ ] 4. Documentation
-- [ ] 4.1 (P) Update the project README with the macOS install path
+- [x] 4.1 (P) Update the project README with the macOS install path
   - Add a one-paragraph disambiguator at the top of the setup region that introduces the two install paths (Pi for scheduled production, Mac for manual on-demand) and points the reader to the appropriate section
   - Append a new "Setup on macOS (manual mode)" section after the existing Pi runbook that walks the operator through bootstrap → pair → test-pipeline → run, using the same fenced bash code-block style as the Pi runbook, and references the existing Customise the config block instead of restating it
   - Include an explicit callout in the macOS section that install-schedule and uninstall-schedule exit non-zero on macOS by design, that no launchd or cron integration is provided, and that the operator must invoke renewsable run themselves
