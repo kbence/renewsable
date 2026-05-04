@@ -39,6 +39,7 @@ Why no-arg rather than ``env: dict[str, str] | None = None``
 from __future__ import annotations
 
 import os
+import sys  # noqa: F401  (kept as module-level alias for tests; see rmapi_config_path)
 from pathlib import Path
 
 __all__ = [
@@ -124,8 +125,32 @@ def systemd_user_unit_dir() -> Path:
 def rmapi_config_path() -> Path:
     """Path to the ``rmapi`` client's persisted device-token config file.
 
-    ``$XDG_CONFIG_HOME/rmapi/rmapi.conf`` else ``~/.config/rmapi/rmapi.conf``.
+    Resolution order (mirrors what the ``rmapi`` binary itself does):
+
+    1. ``$RMAPI_CONFIG``, if set to a non-empty value. ``rmapi`` honours this
+       env var as an explicit path override on every platform.
+    2. The platform-default location:
+
+       * **Linux** (and unknown platforms): ``$XDG_CONFIG_HOME/rmapi/rmapi.conf``
+         else ``~/.config/rmapi/rmapi.conf``.
+       * **macOS**: ``$HOME/Library/Application Support/rmapi/rmapi.conf``.
+         The ddvk fork of rmapi (Go) calls ``os.UserConfigDir()``, which
+         resolves to ``Library/Application Support`` on Darwin — *not* the
+         Linux-style XDG path. Surfaced during mac-manual-mode E2E
+         verification when ``Pairing.is_paired()`` always returned False on
+         macOS despite a successful ``rmapi`` pair (see ``research.md``
+         addendum on this spec).
+
+    Platform detection reads ``sys.platform`` via the module-level alias so
+    tests can monkeypatch ``paths.sys.platform`` (the same seam pattern
+    ``scheduler.py`` uses for its Darwin-refusal).
+
     This file is owned by the external ``rmapi`` binary; renewsable only
     *reads around* it (for "token present?" detection) and never writes it.
     """
+    override = os.environ.get("RMAPI_CONFIG", "")
+    if override:
+        return Path(override)
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "rmapi" / "rmapi.conf"
     return _xdg_config_home() / "rmapi" / "rmapi.conf"

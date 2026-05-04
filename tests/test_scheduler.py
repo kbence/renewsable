@@ -34,6 +34,31 @@ from renewsable.scheduler import Scheduler
 
 
 # ---------------------------------------------------------------------------
+# Autouse fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_scheduler_platform_to_linux(monkeypatch):
+    """Pin ``sched_mod.sys.platform`` to ``"linux"`` for every test.
+
+    The scheduler exposes ``sys`` as a module-level alias (mirroring the
+    existing ``subprocess`` alias) so platform-dependent branches can be
+    monkey-patched in tests. The macOS dev box reports
+    ``sys.platform == "darwin"``; without this fixture, any future
+    Darwin-refusal branch in the scheduler would short-circuit every
+    existing test on a Mac. Pinning the alias to ``"linux"`` keeps the
+    pre-existing test suite green regardless of the host kernel.
+
+    Tests that need to exercise the macOS path can override this fixture
+    inline by re-setting the same attribute, e.g.::
+
+        monkeypatch.setattr(sched_mod.sys, "platform", "darwin")
+    """
+    monkeypatch.setattr(sched_mod.sys, "platform", "linux")
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -354,3 +379,77 @@ def test_reinstall_with_new_time_overwrites_timer(tmp_path, monkeypatch):
     Scheduler(cfg2, exe_path=Path("/usr/local/bin/renewsable")).install()
     assert "OnCalendar=*-*-* 09:45:00" in timer.read_text()
     assert "05:30" not in timer.read_text()
+
+
+# ---------------------------------------------------------------------------
+# 10. Darwin refusal — install/uninstall/status raise before any subprocess
+#
+# The scheduler talks to ``systemctl --user``, which does not exist on macOS.
+# ``Scheduler._assert_supported_platform()`` (Task 2.1) refuses up-front when
+# ``sys.platform == "darwin"`` and points operators at the manual CLI
+# entrypoints. These three tests override the autouse ``linux`` pin inline
+# and lock in the refusal contract:
+#   1. ``ScheduleError`` is raised.
+#   2. ``str(exc)`` names both supported entrypoints — ``renewsable run`` and
+#      ``renewsable test-pipeline`` — so the operator knows what to do next.
+#   3. No ``subprocess.run`` call leaks through; the recording fake stays
+#      empty.
+# ``status`` is included even though no CLI command currently dispatches to
+# it: locking the symmetry in test prevents a future regression from quietly
+# dropping the refusal on one of the three methods.
+# ---------------------------------------------------------------------------
+
+
+def test_install_refuses_on_darwin(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    fake = _FakeRun()
+    monkeypatch.setattr(sched_mod.subprocess, "run", fake)
+    # Override the autouse linux pin: exercise the macOS refusal branch.
+    monkeypatch.setattr(sched_mod.sys, "platform", "darwin")
+
+    cfg = _make_config(tmp_path)
+    s = Scheduler(cfg, exe_path=Path("/usr/local/bin/renewsable"))
+
+    with pytest.raises(ScheduleError) as excinfo:
+        s.install()
+
+    msg = str(excinfo.value)
+    assert "renewsable run" in msg
+    assert "renewsable test-pipeline" in msg
+    assert fake.calls == []
+
+
+def test_uninstall_refuses_on_darwin(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    fake = _FakeRun()
+    monkeypatch.setattr(sched_mod.subprocess, "run", fake)
+    monkeypatch.setattr(sched_mod.sys, "platform", "darwin")
+
+    cfg = _make_config(tmp_path)
+    s = Scheduler(cfg, exe_path=Path("/usr/local/bin/renewsable"))
+
+    with pytest.raises(ScheduleError) as excinfo:
+        s.uninstall()
+
+    msg = str(excinfo.value)
+    assert "renewsable run" in msg
+    assert "renewsable test-pipeline" in msg
+    assert fake.calls == []
+
+
+def test_status_refuses_on_darwin(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    fake = _FakeRun()
+    monkeypatch.setattr(sched_mod.subprocess, "run", fake)
+    monkeypatch.setattr(sched_mod.sys, "platform", "darwin")
+
+    cfg = _make_config(tmp_path)
+    s = Scheduler(cfg, exe_path=Path("/usr/local/bin/renewsable"))
+
+    with pytest.raises(ScheduleError) as excinfo:
+        s.status()
+
+    msg = str(excinfo.value)
+    assert "renewsable run" in msg
+    assert "renewsable test-pipeline" in msg
+    assert fake.calls == []

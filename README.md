@@ -22,6 +22,8 @@ Pipeline: configurable RSS feeds → in-process article extraction (`feedparser`
 - The Pi has outbound internet, an accurate clock (default `systemd-timesyncd` is fine), and is kept powered on.
 - A development machine (macOS is what this project is built against) with `git` and SSH access to the Pi.
 
+Renewsable supports two install paths. The Raspberry Pi path is the production path: a Pi runs a `systemd --user` timer that fires the daily build on schedule, so you wake up to a fresh paper already on the tablet. The macOS path is a manual-mode parallel: an Apple Silicon or Intel Mac runs the same pipeline, but only when you invoke `renewsable run` yourself — there is no scheduler on Darwin by design. Pick the Pi runbook below if you want "wakes up to a fresh paper" semantics; pick the macOS section after it if you prefer "I run it when I want it" semantics.
+
 ## Setup on the Pi (one-time)
 
 Run these steps in order on the Pi, from a fresh checkout of this repo.
@@ -88,6 +90,50 @@ sudo loginctl enable-linger $USER
 Without this, the user-level `systemd` instance stops when your SSH session ends and the timer never fires. This step is manual because it requires `sudo` and is a one-time system-policy change — the bootstrap script refuses to touch it on your behalf.
 
 You are done. The Pi will build and upload a dated EPUB every day at the configured time.
+
+## Setup on macOS (manual mode)
+
+The parallel install path for an Apple Silicon or Intel Mac (Darwin only). This is a manual-mode-only path: there is no scheduler equivalent on macOS, and the operator invokes `renewsable run` themselves whenever they want a digest. Run these steps in order from a fresh checkout of this repo.
+
+### 1. Run the bootstrap script
+
+```bash
+./scripts/install-mac.sh
+```
+
+This is idempotent: it sanity-checks the host (Darwin, `arm64` or `x86_64`), creates a project-local venv at `.venv/`, installs `renewsable` in editable mode with dev extras, downloads the latest `ddvk/rmapi` macOS release matching the host architecture into `.venv/bin/rmapi`, and clears the macOS quarantine xattr defensively. Re-running on a fully bootstrapped host completes without re-downloading the archive or recreating the venv.
+
+### 2. Pair with your reMarkable cloud account
+
+```bash
+source .venv/bin/activate
+renewsable pair
+```
+
+Same flow as on the Pi: open <https://my.remarkable.com/device/desktop/connect> in a browser logged into the same reMarkable account, copy the 8-character one-time code, and paste it into the `rmapi` prompt. The token persists at `~/.config/rmapi/rmapi.conf`; subsequent commands run headlessly.
+
+### 3. Smoke-test the full pipeline
+
+```bash
+renewsable --config config/config.example.json test-pipeline
+```
+
+This builds a dated EPUB and uploads it to the configured reMarkable folder end-to-end against the shipped example config — no schedule fire time involved.
+
+### 4. Daily use: run the build manually
+
+```bash
+renewsable run
+```
+
+Invoke this whenever you want a fresh digest. There is no timer that does it for you.
+
+### 5. Customise the config (optional)
+
+Identical to the Pi runbook's "Customise the config" step above — copy `config/config.example.json` to `~/.config/renewsable/config.json` and edit `stories` and `schedule_time` to taste. (Note: `schedule_time` has no behavioural effect on macOS, since there is no scheduler reading it; treat it as documentation of the intended fire time if you ever migrate this config to a Pi.) See the [Configuration reference](#configuration-reference) below and `config/README.md` for the authoritative field docs.
+
+> [!IMPORTANT]
+> **Scheduling is not supported on macOS.** `renewsable install-schedule` and `renewsable uninstall-schedule` exit non-zero on Darwin by design and never touch host scheduler state. There is no `launchd` or `cron` integration provided; the operator must invoke `renewsable run` themselves when they want a digest. If you need a scheduled daily paper, use the Pi runbook above instead.
 
 ## Deployment workflow (macOS → Pi)
 

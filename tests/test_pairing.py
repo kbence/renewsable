@@ -15,9 +15,13 @@ patch ``renewsable.pairing.subprocess.run`` so no real subprocess is
 spawned. The pairing module exposes ``subprocess`` as a module-level
 alias specifically for this boundary (same pattern as ``scheduler``).
 
-The rmapi config path is resolved via ``renewsable.paths.rmapi_config_path``
-which reads ``$XDG_CONFIG_HOME``. Tests pin the env var via monkeypatch so
-the resolved path lands under ``tmp_path``.
+The rmapi config path is resolved via ``renewsable.paths.rmapi_config_path``,
+which is **platform-aware**: ``$XDG_CONFIG_HOME/rmapi/rmapi.conf`` on Linux
+but ``$HOME/Library/Application Support/rmapi/rmapi.conf`` on macOS (rmapi
+itself uses Go's ``os.UserConfigDir()``). Tests pin both ``$XDG_CONFIG_HOME``
+*and* ``paths.sys.platform = "linux"`` (plus clear ``$RMAPI_CONFIG``) so the
+resolved path is deterministic on any host the suite runs on, including the
+macOS dev box.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from typing import Any
 import pytest
 
 from renewsable import pairing as pairing_mod
+from renewsable import paths as paths_mod
 from renewsable.config import Config
 from renewsable.errors import PairingError
 from renewsable.pairing import Pairing
@@ -58,9 +63,23 @@ def _make_config(tmp_path: Path, rmapi_bin: str = "rmapi") -> Config:
 
 @pytest.fixture
 def xdg_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Pin ``$XDG_CONFIG_HOME`` to tmp_path so rmapi_config_path() is deterministic."""
+    """Pin rmapi_config_path() to tmp_path so the resolved path is deterministic.
+
+    rmapi_config_path() branches on ``sys.platform`` (Linux uses XDG, macOS
+    uses Library/Application Support) and honours ``$RMAPI_CONFIG`` as an
+    explicit override. To make the Linux-XDG branch the only path under test,
+    we:
+
+    1. Force the platform alias to ``"linux"`` so rmapi_config_path() takes
+       the XDG branch even on a macOS dev box.
+    2. Clear ``$RMAPI_CONFIG`` so its override does not pre-empt XDG.
+    3. Pin ``$XDG_CONFIG_HOME`` to ``tmp_path``.
+
+    The returned path is ``$XDG_CONFIG_HOME/rmapi/rmapi.conf``.
+    """
+    monkeypatch.setattr(paths_mod.sys, "platform", "linux")
+    monkeypatch.delenv("RMAPI_CONFIG", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    # The rmapi config lives at ``$XDG_CONFIG_HOME/rmapi/rmapi.conf``.
     return tmp_path / "rmapi" / "rmapi.conf"
 
 
