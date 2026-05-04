@@ -32,6 +32,7 @@ mirrors the convention in ``renewsable.builder`` and ``renewsable.http``.
 from __future__ import annotations
 
 import logging
+import re
 import urllib.parse
 from dataclasses import dataclass
 
@@ -230,7 +231,8 @@ def _build_article(
             return None
 
         clean_title = (title or "").strip() or "(untitled)"
-        return Article(title=clean_title, html=sanitized, source_url=link)
+        deduplicated = _strip_duplicate_title_h1(sanitized, clean_title)
+        return Article(title=clean_title, html=deduplicated, source_url=link)
     except Exception as exc:  # belt-and-braces: per-entry never raises out
         logger.warning(
             "unexpected error processing entry %r: %s",
@@ -461,3 +463,63 @@ def _has_text(html: str) -> bool:
         return bool(html.strip())
     text = fragment.text_content() if hasattr(fragment, "text_content") else ""
     return bool(text and text.strip())
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-title heading stripping (GH #11)
+# ---------------------------------------------------------------------------
+
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_heading_text(text: str) -> str:
+    """Lowercase + collapse internal whitespace + strip — for tolerant title compares."""
+    return _WHITESPACE_RE.sub(" ", (text or "").strip()).casefold()
+
+
+def _strip_duplicate_title_h1(html: str, title: str) -> str:
+    """Remove ``<h1>`` elements from ``html`` whose text matches ``title``.
+
+    GH #11: the EPUB chapter wrapper renders ``<h1>{title}</h1>`` at the top of
+    every chapter unconditionally. When the extractor-produced article body
+    also contains an ``<h1>`` matching that title, the chapter ends up with
+    two stacked title headings — visible on most pages because trafilatura
+    and readability-lxml both keep the page's headline element in their
+    output. Strip only the ``<h1>`` tags whose text matches the article
+    title so genuinely-different headings (rare but informative) survive.
+
+    Comparison is whitespace-collapsed and case-insensitive so trivial
+    variations between the RSS-entry title and the page's ``<h1>`` text
+    (extra spaces, mixed case, trailing newlines) still trigger the strip.
+    """
+    if not title:
+        return html
+    target = _normalize_heading_text(title)
+    if not target:
+        return html
+
+    try:
+        tree = lxml.html.fragment_fromstring(html, create_parent="div")
+    except Exception:
+        return html
+
+    removed = False
+    for h1 in list(tree.iter("h1")):
+        if _normalize_heading_text(h1.text_content()) == target:
+            parent = h1.getparent()
+            if parent is not None:
+                parent.remove(h1)
+                removed = True
+
+    if not removed:
+        return html
+
+    # Serialize the inner content of the wrapping <div> we created — so the
+    # output keeps the same shape as the input (no extra wrapper introduced).
+    inner = tree.text or ""
+    inner += "".join(
+        lxml.html.tostring(child, encoding="unicode", method="html")
+        for child in tree
+    )
+    return inner
