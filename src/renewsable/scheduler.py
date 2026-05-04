@@ -30,6 +30,7 @@ Templates
 from __future__ import annotations
 
 import subprocess  # noqa: F401  (kept as module-level alias for tests)
+import sys  # noqa: F401  (kept as module-level alias for tests)
 from importlib.resources import files
 from pathlib import Path
 from string import Template
@@ -91,6 +92,7 @@ class Scheduler:
         Idempotent: each call overwrites the unit files cleanly; a second
         ``daemon-reload`` + ``enable --now`` is a no-op on systemd.
         """
+        self._assert_supported_platform()
         unit_dir = systemd_user_unit_dir()
         unit_dir.mkdir(parents=True, exist_ok=True)
 
@@ -122,6 +124,7 @@ class Scheduler:
         that as success. Missing unit files are tolerated via
         ``Path.unlink(missing_ok=True)``.
         """
+        self._assert_supported_platform()
         unit_dir = systemd_user_unit_dir()
 
         # disable --now — tolerate "unit does not exist" style failures.
@@ -152,6 +155,7 @@ class Scheduler:
         Falls back to ``"no scheduled timer"`` when the command fails or
         produces no output (e.g. the timer is not installed).
         """
+        self._assert_supported_platform()
         result = subprocess.run(
             [
                 "systemctl",
@@ -174,6 +178,26 @@ class Scheduler:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _assert_supported_platform() -> None:
+        """Refuse to drive systemd on macOS.
+
+        The scheduler talks to ``systemctl --user``, which does not exist
+        on Darwin. Reading ``sys.platform`` via the module-level alias
+        keeps the seam mockable from tests
+        (``monkeypatch.setattr(scheduler.sys, "platform", "darwin")``).
+        Operators on macOS should run the digest manually via the CLI;
+        the remediation copy names the two supported entrypoints.
+        """
+        if sys.platform == "darwin":
+            raise ScheduleError(
+                "renewsable does not support scheduled execution on macOS",
+                remediation=(
+                    "run `renewsable run` or `renewsable test-pipeline` "
+                    "manually when you want a digest"
+                ),
+            )
 
     @staticmethod
     def _run_systemctl(argv: list[str], *, error_msg: str) -> None:

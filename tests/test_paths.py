@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from renewsable import paths as paths_mod
 from renewsable.paths import (
     default_config_path,
     default_log_dir,
@@ -35,6 +36,23 @@ from renewsable.paths import (
     rmapi_config_path,
     systemd_user_unit_dir,
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_paths_platform_to_linux(monkeypatch):
+    """Pin ``paths.sys.platform`` to ``"linux"`` for every test in this module.
+
+    ``rmapi_config_path()`` branches on ``sys.platform`` because rmapi (Go,
+    via ``os.UserConfigDir()``) writes to a platform-specific location:
+    ``$XDG_CONFIG_HOME/rmapi/rmapi.conf`` on Linux,
+    ``$HOME/Library/Application Support/rmapi/rmapi.conf`` on macOS.
+
+    Most existing tests in this file assert the Linux branch. Pinning to
+    ``"linux"`` keeps those tests deterministic on a macOS dev box. Tests
+    that exercise the macOS branch override this inline by setting the
+    alias to ``"darwin"``.
+    """
+    monkeypatch.setattr(paths_mod.sys, "platform", "linux")
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +185,80 @@ class TestRmapiConfigPath:
 
     def test_xdg_config_home_empty_falls_back_to_home(self, fake_home, monkeypatch):
         monkeypatch.setenv("XDG_CONFIG_HOME", "")
+        assert rmapi_config_path() == fake_home / ".config" / "rmapi" / "rmapi.conf"
+
+
+# ---------------------------------------------------------------------------
+# rmapi_config_path — macOS branch
+#
+# rmapi (Go) uses ``os.UserConfigDir()`` to choose its config location, which
+# returns ``$HOME/Library/Application Support`` on Darwin. The Linux-style
+# ``~/.config/rmapi/rmapi.conf`` does not exist on macOS — using it caused
+# ``Pairing.is_paired()`` to always return False and surfaced a verification
+# failure during mac-manual-mode E2E. See ``research.md`` addendum for the
+# full incident write-up.
+# ---------------------------------------------------------------------------
+
+
+class TestRmapiConfigPathDarwin:
+    def test_darwin_uses_library_application_support(self, fake_home, monkeypatch):
+        """On macOS, rmapi writes to ``~/Library/Application Support/rmapi/rmapi.conf``."""
+        monkeypatch.setattr(paths_mod.sys, "platform", "darwin")
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("RMAPI_CONFIG", raising=False)
+        assert rmapi_config_path() == (
+            fake_home / "Library" / "Application Support" / "rmapi" / "rmapi.conf"
+        )
+
+    def test_darwin_ignores_xdg_config_home(self, fake_home, monkeypatch):
+        """``XDG_CONFIG_HOME`` is a Linux convention; rmapi on macOS does not honour it.
+
+        Setting ``XDG_CONFIG_HOME`` on macOS must not redirect the rmapi config
+        path — the binary itself reads from Library/Application Support, so
+        renewsable must mirror that.
+        """
+        monkeypatch.setattr(paths_mod.sys, "platform", "darwin")
+        monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/x")
+        monkeypatch.delenv("RMAPI_CONFIG", raising=False)
+        assert rmapi_config_path() == (
+            fake_home / "Library" / "Application Support" / "rmapi" / "rmapi.conf"
+        )
+
+
+# ---------------------------------------------------------------------------
+# rmapi_config_path — RMAPI_CONFIG override
+#
+# rmapi honours ``$RMAPI_CONFIG`` as an explicit path override on every
+# platform, taking precedence over the platform-default location. renewsable
+# must respect the same override so an operator who relocates rmapi.conf
+# (e.g., a shared cloud-synced location) keeps headless-mode detection.
+# ---------------------------------------------------------------------------
+
+
+class TestRmapiConfigPathOverride:
+    def test_rmapi_config_env_var_overrides_linux_default(
+        self, fake_home, monkeypatch, tmp_path
+    ):
+        override = tmp_path / "custom" / "rmapi.conf"
+        monkeypatch.setattr(paths_mod.sys, "platform", "linux")
+        monkeypatch.setenv("RMAPI_CONFIG", str(override))
+        assert rmapi_config_path() == override
+
+    def test_rmapi_config_env_var_overrides_darwin_default(
+        self, fake_home, monkeypatch, tmp_path
+    ):
+        override = tmp_path / "custom" / "rmapi.conf"
+        monkeypatch.setattr(paths_mod.sys, "platform", "darwin")
+        monkeypatch.setenv("RMAPI_CONFIG", str(override))
+        assert rmapi_config_path() == override
+
+    def test_empty_rmapi_config_falls_back_to_default(
+        self, fake_home, monkeypatch
+    ):
+        """An empty ``RMAPI_CONFIG`` is treated as unset (matches XDG semantics)."""
+        monkeypatch.setattr(paths_mod.sys, "platform", "linux")
+        monkeypatch.setenv("RMAPI_CONFIG", "")
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         assert rmapi_config_path() == fake_home / ".config" / "rmapi" / "rmapi.conf"
 
 
