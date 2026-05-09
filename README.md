@@ -10,7 +10,7 @@ Pipeline: configurable RSS feeds → in-process article extraction (`feedparser`
 ## Status
 
 - Core pipeline (build + upload + scheduled run + pairing) is implemented and unit-tested.
-- Bootstrap script (`scripts/install-pi.sh`) provisions apt prerequisites, a project-local venv, and a pinned `rmapi` binary on Raspberry Pi OS Bookworm 64-bit.
+- Bootstrap script (`scripts/install-pi.sh`) provisions apt prerequisites, a project-local venv, and a pinned `rmapi` binary on Raspberry Pi OS 64-bit (Bullseye/Python 3.9 and Bookworm/Python 3.11 both supported).
 - Config loader, logging with credential redaction, per-feed retry/backoff, `systemd --user` timer install/uninstall, and end-to-end `test-pipeline` are all wired.
 - Rendering is a clean reflowable EPUB (one chapter per article, embedded images); device-specific page layout is delegated to the reMarkable EPUB reader.
 - Cross-day deduplication and any monitoring dashboard are explicit non-goals.
@@ -18,7 +18,7 @@ Pipeline: configurable RSS feeds → in-process article extraction (`feedparser`
 ## Prerequisites
 
 - A reMarkable 2 (or Paper Pro) with a logged-in reMarkable cloud account on `my.remarkable.com`.
-- A Raspberry Pi running **Raspberry Pi OS Bookworm 64-bit** (`aarch64` / `arm64`). 32-bit Pi OS (`armv7l` / `armhf`) is **not supported** — there is no prebuilt `rmapi` binary for 32-bit ARM and `install-pi.sh` refuses to run.
+- A Raspberry Pi running **Raspberry Pi OS 64-bit** (`aarch64` / `arm64`), Bullseye or Bookworm. The system Python must be **≥ 3.9** (Bullseye ships 3.9, Bookworm ships 3.11; both are fine and `install-pi.sh` checks). 32-bit Pi OS (`armv7l` / `armhf`) is **not supported** — there is no prebuilt `rmapi` binary for 32-bit ARM and `install-pi.sh` refuses to run.
 - The Pi has outbound internet, an accurate clock (default `systemd-timesyncd` is fine), and is kept powered on.
 - A development machine (macOS is what this project is built against) with `git` and SSH access to the Pi.
 

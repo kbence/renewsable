@@ -30,6 +30,7 @@ import time as _time  # noqa: F401  (module-level alias kept for tests)
 import urllib.parse
 import urllib.request as urllib_request  # noqa: F401  (module-level alias kept for tests)
 import urllib.robotparser
+from typing import Optional
 
 
 __all__ = ["RobotsCache", "fetch_with_retry", "robots_allows"]
@@ -38,7 +39,11 @@ __all__ = ["RobotsCache", "fetch_with_retry", "robots_allows"]
 logger = logging.getLogger(__name__)
 
 
-RobotsCache = dict[str, urllib.robotparser.RobotFileParser | None]
+# Module-level type alias — evaluated at import time, so we cannot rely on
+# PEP 604 ``X | None`` here on Python 3.9. Annotations elsewhere in this
+# module use the ``X | Y`` form because they are protected by the
+# ``from __future__ import annotations`` import above.
+RobotsCache = dict[str, Optional[urllib.robotparser.RobotFileParser]]
 
 
 def fetch_with_retry(

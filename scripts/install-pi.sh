@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# install-pi.sh — Raspberry Pi OS Bookworm 64-bit bootstrap for renewsable.
+# install-pi.sh — Raspberry Pi OS 64-bit bootstrap for renewsable.
+#
+# Supports Bullseye (Python 3.9) and Bookworm (Python 3.11). renewsable
+# itself targets Python >= 3.9 per pyproject.toml.
 #
 # Run from the project root on the Pi:
 #     ./scripts/install-pi.sh
 #
 # What it does (idempotent):
-#   1. Sanity-checks the working directory and the host architecture.
+#   1. Sanity-checks the working directory, the host architecture, and the
+#      system Python version (>= 3.9).
 #   2. Installs apt prerequisites: a baseline of system libraries plus
 #      Hungarian/Latin fonts (mostly inherited from the goosepaper/WeasyPrint
 #      era; harmless to keep now that output is EPUB).
@@ -79,6 +83,16 @@ require_cmd install
 # sha256sum lives in coreutils on Raspberry Pi OS and is used for the
 # rmapi release checksum verification below.
 require_cmd sha256sum
+
+# Python >= 3.9 is the minimum renewsable supports (pyproject.toml's
+# requires-python). Bullseye ships 3.9, Bookworm ships 3.11; both are fine.
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_OK=$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 9) else "no")')
+if [ "$PY_OK" != "yes" ]; then
+  die "renewsable requires Python >= 3.9, found $PY_VER. Upgrade Raspberry Pi OS \
+or install a newer python3 before re-running this script."
+fi
+log "system python: $PY_VER (ok)"
 
 # --- 4. apt install system dependencies (idempotent) -------------------------
 # Baseline set originally chosen for the goosepaper/WeasyPrint era: Pango,

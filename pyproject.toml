@@ -7,11 +7,13 @@ name = "renewsable"
 version = "0.1.0"
 description = "Daily news digest EPUB pipeline for reMarkable 2, scheduled on a Raspberry Pi."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Bence Kiglics" }]
 dependencies = [
-    "click>=8.1",
+    # Click 8.2 bumped its requires-python to >=3.10. Cap at <8.2 so a Pi
+    # running Bullseye (Python 3.9) still resolves a compatible click.
+    "click>=8.1,<8.2",
     "ebooklib>=0.18",
     "feedparser>=6.0",
     "trafilatura>=2.0.0,<3",
@@ -37,7 +39,9 @@ Repository = "https://github.com/kbence/renewsable"
 Issues = "https://github.com/kbence/renewsable/issues"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+# pytest 9 raised its requires-python to >=3.10. Cap the dev extra so a
+# Pi-side `pip install -e .[dev]` on Python 3.9 still resolves cleanly.
+dev = ["pytest>=8,<9"]
 
 [project.scripts]
 renewsable = "renewsable.cli:main"
