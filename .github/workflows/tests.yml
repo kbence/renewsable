@@ -11,7 +11,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # 3.9 is the floor — Raspberry Pi OS Bullseye ships 3.9 and that is
+        # the deployment target. 3.11 is Bookworm. 3.12/3.13 are forward-
+        # compatibility coverage for future Pi OS releases and dev boxes.
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
