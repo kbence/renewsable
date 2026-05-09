@@ -151,8 +151,14 @@ def isolated_xdg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture()
 def runner() -> CliRunner:
-    # Click 8.2+ returns stderr separately on ``Result.stderr`` by default;
-    # the legacy ``mix_stderr`` kwarg was removed in 8.2.
+    # Click 8.1 (the upper bound the project pins for Python 3.9 support)
+    # mixes stdout/stderr by default and requires ``mix_stderr=False`` to
+    # expose ``result.stderr`` separately. Click 8.2 removed the kwarg and
+    # returns stderr separately by default. Pass it via kwargs only when
+    # the installed Click signature still accepts it.
+    import inspect
+    if "mix_stderr" in inspect.signature(CliRunner.__init__).parameters:
+        return CliRunner(mix_stderr=False)
     return CliRunner()
 
 
