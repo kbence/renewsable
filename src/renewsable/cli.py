@@ -307,9 +307,17 @@ def install_schedule(ctx: click.Context) -> None:
     """
     config = _bootstrap(ctx)
     exe_path = _exe_path()
+    # Forward the explicit --config path (if any) so the rendered service
+    # unit pins it via `ExecStart=… --config <abs-path> run`. Without this
+    # the scheduled fire on a fresh Pi resolves to the XDG default which
+    # may not exist (gh-16, Bug 1).
+    cli_config_path = ctx.obj["config_path"]
+    config_path = (
+        Path(cli_config_path).resolve() if cli_config_path is not None else None
+    )
 
     def _do() -> None:
-        Scheduler(config, exe_path).install()
+        Scheduler(config, exe_path, config_path=config_path).install()
         click.echo(f"installed schedule at {config.schedule_time}")
 
     _run_with_error_translation(ctx, _do)

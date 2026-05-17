@@ -4,5 +4,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$exe_path run
+ExecStart=$exe_path${config_arg} run
 Environment=HOME=$home
+Environment=PATH=$exe_bin_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin

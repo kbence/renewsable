@@ -113,8 +113,18 @@ def _install_fakes(
                 raise upload_raises
 
     class FakeScheduler:
-        def __init__(self, config: Any, exe_path: Path) -> None:
-            rec.record("Scheduler.__init__", config, exe_path=exe_path)
+        def __init__(
+            self,
+            config: Any,
+            exe_path: Path,
+            config_path: Path | None = None,
+        ) -> None:
+            rec.record(
+                "Scheduler.__init__",
+                config,
+                exe_path=exe_path,
+                config_path=config_path,
+            )
 
         def install(self) -> None:
             rec.record("Scheduler.install")
@@ -432,6 +442,51 @@ def test_install_schedule_calls_scheduler(
     )
     assert result.exit_code == 0, (result.output, result.stderr)
     assert "Scheduler.install" in recorder.names()
+
+
+def test_install_schedule_forwards_explicit_config_path(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    isolated_xdg: Path,
+) -> None:
+    """gh-16 Bug 1: when ``--config`` is supplied at install time, the
+    scheduler must receive that path so the rendered ExecStart pins it.
+    Without this, the scheduled run resolves the XDG default which may
+    not exist on a fresh deployment.
+    """
+    _install_fakes(monkeypatch, recorder)
+    result = runner.invoke(
+        main, ["--config", str(VALID_CONFIG), "install-schedule"]
+    )
+    assert result.exit_code == 0, (result.output, result.stderr)
+    init_calls = [c for c in recorder.calls if c[0] == "Scheduler.__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2]["config_path"] == VALID_CONFIG.resolve()
+
+
+def test_install_schedule_passes_none_config_path_for_xdg_default(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    recorder: _Recorder,
+    tmp_path: Path,
+    isolated_xdg: Path,
+) -> None:
+    """When the operator did not pass ``--config``, the scheduler should
+    receive ``config_path=None`` — the scheduled run will fall back to
+    the XDG default just like the interactive invocation did.
+    """
+    # Drop a valid config into the default XDG path so _bootstrap succeeds.
+    cfg_dir = isolated_xdg / "config" / "renewsable"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text(VALID_CONFIG.read_text())
+
+    _install_fakes(monkeypatch, recorder)
+    result = runner.invoke(main, ["install-schedule"])
+    assert result.exit_code == 0, (result.output, result.stderr)
+    init_calls = [c for c in recorder.calls if c[0] == "Scheduler.__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2]["config_path"] is None
 
 
 def test_uninstall_schedule_calls_scheduler(
