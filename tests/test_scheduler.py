@@ -127,8 +127,73 @@ def test_service_template_renders_exactly(tmp_path, monkeypatch):
         "Type=oneshot\n"
         "ExecStart=/usr/local/bin/renewsable run\n"
         f"Environment=HOME={Path.home()}\n"
+        "Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin\n"
     )
     assert service_text == expected
+
+
+def test_service_template_includes_config_when_supplied(tmp_path, monkeypatch):
+    """Bug 1 (gh-16): install-schedule --config <path> must render ExecStart
+    with --config <abs-path> so the scheduled run uses the same config the
+    operator supplied at install time, instead of resolving the XDG default
+    (which may not exist on a fresh deployment).
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    fake = _FakeRun()
+    monkeypatch.setattr(sched_mod.subprocess, "run", fake)
+
+    cfg = _make_config(tmp_path)
+    cfg_path = tmp_path / "config" / "renewsable.json"
+    s = Scheduler(
+        cfg,
+        exe_path=Path("/usr/local/bin/renewsable"),
+        config_path=cfg_path,
+    )
+    s.install()
+
+    service_text = (tmp_path / "cfg" / "systemd" / "user" / "renewsable.service").read_text()
+    assert (
+        f"ExecStart=/usr/local/bin/renewsable --config {cfg_path} run\n"
+        in service_text
+    )
+
+
+def test_service_template_uses_absolute_config_path(tmp_path, monkeypatch):
+    """A relative ``--config`` path must be made absolute when written into
+    the service unit — systemd does not run with the operator's CWD."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setattr(sched_mod.subprocess, "run", _FakeRun())
+    monkeypatch.chdir(tmp_path)
+
+    cfg = _make_config(tmp_path)
+    rel = Path("config/renewsable.json")
+    s = Scheduler(cfg, exe_path=Path("/usr/local/bin/renewsable"), config_path=rel)
+    s.install()
+
+    service_text = (tmp_path / "cfg" / "systemd" / "user" / "renewsable.service").read_text()
+    expected_abs = (tmp_path / "config" / "renewsable.json").resolve()
+    assert f"--config {expected_abs} run" in service_text
+    # No relative leftover.
+    assert " --config config/renewsable.json " not in service_text
+
+
+def test_service_template_path_env_uses_exe_bin_dir(tmp_path, monkeypatch):
+    """Bug 2 (gh-16): the rendered service unit must put the exe's bin
+    directory on PATH so subprocesses like ``rmapi`` installed inside the
+    project's venv resolve under ``systemctl --user``.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setattr(sched_mod.subprocess, "run", _FakeRun())
+
+    cfg = _make_config(tmp_path)
+    exe = Path("/home/kali/src/renewsable/.venv/bin/renewsable")
+    Scheduler(cfg, exe_path=exe).install()
+
+    service_text = (tmp_path / "cfg" / "systemd" / "user" / "renewsable.service").read_text()
+    assert (
+        "Environment=PATH=/home/kali/src/renewsable/.venv/bin:"
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin\n"
+    ) in service_text
 
 
 def test_timer_template_renders_exactly(tmp_path, monkeypatch):

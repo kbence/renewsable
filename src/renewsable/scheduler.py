@@ -75,12 +75,29 @@ class Scheduler:
     exe_path:
         Absolute path to the installed ``renewsable`` entrypoint (e.g.
         ``/home/pi/.venv/bin/renewsable``). Substituted into
-        ``ExecStart=$exe_path run``.
+        ``ExecStart=$exe_path run``. The directory part also seeds the
+        rendered ``Environment=PATH=`` so child processes such as
+        ``rmapi`` installed alongside the entrypoint resolve under
+        ``systemctl --user`` (which does not inherit the operator's
+        interactive shell PATH).
+    config_path:
+        Optional config path supplied via ``renewsable --config <path>
+        install-schedule``. When provided, the rendered ``ExecStart``
+        becomes ``$exe_path --config <abs-path> run`` so the scheduled
+        run uses the same config file the operator vetted interactively
+        — instead of silently resolving the XDG default, which may not
+        exist on a fresh deployment (gh-16).
     """
 
-    def __init__(self, config: Config, exe_path: Path) -> None:
+    def __init__(
+        self,
+        config: Config,
+        exe_path: Path,
+        config_path: Path | None = None,
+    ) -> None:
         self.config = config
         self.exe_path = exe_path
+        self.config_path = config_path
 
     # ------------------------------------------------------------------
     # Public API
@@ -96,8 +113,14 @@ class Scheduler:
         unit_dir = systemd_user_unit_dir()
         unit_dir.mkdir(parents=True, exist_ok=True)
 
+        if self.config_path is not None:
+            config_arg = f" --config {Path(self.config_path).resolve()}"
+        else:
+            config_arg = ""
         service_text = _load_template(_SERVICE_TEMPLATE).substitute(
             exe_path=str(self.exe_path),
+            config_arg=config_arg,
+            exe_bin_dir=str(Path(self.exe_path).parent),
             home=str(Path.home()),
         )
         timer_text = _load_template(_TIMER_TEMPLATE).substitute(

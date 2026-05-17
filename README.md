@@ -71,7 +71,7 @@ cp config/config.example.json ~/.config/renewsable/config.json
 $EDITOR ~/.config/renewsable/config.json
 ```
 
-Edit the `stories` list and `schedule_time` to taste. See the [Configuration reference](#configuration-reference) below and `config/README.md` for the authoritative field docs. If you skip this step, keep passing `--config config/config.example.json` on every invocation.
+Edit the `stories` list and `schedule_time` to taste. See the [Configuration reference](#configuration-reference) below and `config/README.md` for the authoritative field docs. If you skip this step, keep passing `--config config/config.example.json` on every invocation, including to `install-schedule` — see below.
 
 ### 6. Install the daily schedule
 
@@ -79,7 +79,7 @@ Edit the `stories` list and `schedule_time` to taste. See the [Configuration ref
 renewsable install-schedule
 ```
 
-Add `--config <path>` if you are using a non-default config location. This writes `renewsable.service` and `renewsable.timer` into `~/.config/systemd/user/`, reloads `systemctl --user`, and enables the timer.
+Add `--config <path>` if you are using a non-default config location. `install-schedule` pins whatever path you supply into the rendered `ExecStart=`, so the scheduled fire uses the same config the operator vetted at install time — copying `config.example.json` into `~/.config/renewsable/config.json` is genuinely optional. This writes `renewsable.service` and `renewsable.timer` into `~/.config/systemd/user/`, reloads `systemctl --user`, and enables the timer.
 
 ### 7. Enable lingering so the timer fires when you are not logged in
 
