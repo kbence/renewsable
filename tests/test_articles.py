@@ -525,7 +525,9 @@ def test_protocol_relative_img_src_resolved(monkeypatch: pytest.MonkeyPatch) -> 
     rss_url = "https://example.com/feed.xml"
     art_url = "https://example.com/article"
     article_html = (
-        "<html><body><article><p>" + ("body " * 50) + "</p>"
+        "<html><body><article><p>"
+        + ("Plenty of body content. " * 20)
+        + "</p>"
         '<img src="//cdn.example.com/x.png"/>'
         "</article></body></html>"
     )
@@ -816,8 +818,14 @@ def test_differing_h1_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     article_html = (
         "<html><body><article>"
         "<h1>A Different Headline From The Title</h1>"
-        + ("<p>Plenty of body content. " * 8)
-        + "</p></article></body></html>"
+        # Distinct paragraphs on purpose: trafilatura >= 2.1 collapses runs of
+        # identical short paragraphs into one <p> and drops the <h1> with them,
+        # which would make this test fail for a reason unrelated to what it checks.
+        + "".join(
+            f"<p>Plenty of body content, paragraph number {i} of the article.</p>"
+            for i in range(8)
+        )
+        + "</article></body></html>"
     )
 
     feed = _FakeFeed([{"title": "Original RSS Entry Title", "link": art_url, "summary": "x"}])
