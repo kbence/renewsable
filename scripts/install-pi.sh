@@ -30,12 +30,14 @@ set -euo pipefail
 # Maintainer note: the macOS counterpart lives in scripts/install-mac.sh and
 # intentionally uses a different fetch policy (Mac: latest release, no pin;
 # Pi: pinned version + SHA-256). See scripts/README.md for the rationale.
-RMAPI_VERSION="v0.0.32"
+RMAPI_VERSION="v0.0.35"
 RMAPI_TAR="rmapi-linux-arm64.tar.gz"
 RMAPI_URL="https://github.com/ddvk/rmapi/releases/download/${RMAPI_VERSION}/${RMAPI_TAR}"
 # SHA-256 of ${RMAPI_TAR} as published for ${RMAPI_VERSION}. Verified
-# 2026-04-19 by downloading the release asset from github.com/ddvk/rmapi.
-RMAPI_SHA256="6e5ced303da31989786c5bf6abd933202c046576722a3fe0d89e2fa50e0ea102"
+# 2026-08-20 against the GitHub release API digest. v0.0.35 is the first release
+# containing ddvk/rmapi#77, without which every upload fails with HTTP 400
+# {"message":"invalid root schema"} (ddvk/rmapi#75).
+RMAPI_SHA256="645c170d8119b4dcb652cf79612e362fcb032dc0e5869ff520eec1324da39637"
 
 VENV_DIR=".venv"
 
