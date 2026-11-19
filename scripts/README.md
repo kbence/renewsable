@@ -73,8 +73,8 @@ package list; already-installed components are skipped.
 The rmapi version and SHA-256 are pinned at the top of `install-pi.sh`:
 
 ```sh
-RMAPI_VERSION="v0.0.32"
-RMAPI_SHA256="6e5ced303da31989786c5bf6abd933202c046576722a3fe0d89e2fa50e0ea102"
+RMAPI_VERSION="v0.0.35"
+RMAPI_SHA256="645c170d8119b4dcb652cf79612e362fcb032dc0e5869ff520eec1324da39637"
 ```
 
 To bump:
@@ -121,17 +121,17 @@ Gatekeeper at first run. If a maintainer ever changes the install path or
 swaps `curl` for another download tool, that quarantine-clear step must
 continue to run.
 
-**Rationale.** The Pi-side `v0.0.32` pin is broken in production today —
-it triggers the sync-v3 `invalid hash` failure against the live
-reMarkable cloud, which upstream fixed in `v0.0.33`. For a one-operator
-project, getting stuck on a known-bad pinned binary has historically been
-a higher-impact failure mode than a tampered upstream release. Trading
-tamper detection (low-impact for a single operator pulling over HTTPS
-from a TLS-pinned GitHub release URL) for resilience to broken pins is
-the correct call here.
+**Rationale.** The Pi-side pin historically trailed the live cloud: the
+`v0.0.32` pin tripped the sync-v3 `invalid hash` failure, and the later
+`invalid root schema` `400` that only `v0.0.35` fixes (ddvk/rmapi#77). For a
+one-operator project, getting stuck on a known-bad pinned binary has
+historically been a higher-impact failure mode than a tampered upstream
+release. Trading tamper detection (low-impact for a single operator pulling
+over HTTPS from a TLS-pinned GitHub release URL) for resilience to broken
+pins is the correct call here.
 
 This policy **differs from `install-pi.sh`**, which still pins
-`RMAPI_VERSION` and `RMAPI_SHA256`. Bumping or dropping the Pi pin is a
-separate concern with its own validation surface (the Pi is the
-production path) and is **not delivered by this spec**. It is recorded
-as a known follow-up.
+`RMAPI_VERSION` and `RMAPI_SHA256` (currently `v0.0.35`). Bumping the Pi pin
+is a separate concern with its own validation surface (the Pi is the
+production path): the pin was moved to `v0.0.35` to pick up ddvk/rmapi#77,
+without which every upload fails with `400 invalid root schema`.

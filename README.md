@@ -13,6 +13,7 @@ Pipeline: configurable RSS feeds → in-process article extraction (`feedparser`
 - Bootstrap script (`scripts/install-pi.sh`) provisions apt prerequisites, a project-local venv, and a pinned `rmapi` binary on Raspberry Pi OS 64-bit (Bullseye/Python 3.9 and Bookworm/Python 3.11 both supported).
 - Config loader, logging with credential redaction, per-feed retry/backoff, `systemd --user` timer install/uninstall, and end-to-end `test-pipeline` are all wired.
 - Rendering is a clean reflowable EPUB (one chapter per article, embedded images); device-specific page layout is delegated to the reMarkable EPUB reader.
+- An optional LLM ranking stage can filter and order articles by relevance before assembly; it is off by default and fail-open ([details](#optional-llm-ranking)).
 - Cross-day deduplication and any monitoring dashboard are explicit non-goals.
 
 ## Prerequisites
@@ -181,12 +182,63 @@ The config is a single JSON object. Unknown top-level keys are rejected to catch
 | `feed_fetch_backoff_s` | number > 0 | no | `1.0` | Base seconds between feed-fetch retries. |
 | `upload_retries` | integer > 0 | no | `3` | Attempts per `rmapi` upload before raising `UploadError`. |
 | `upload_backoff_s` | number > 0 | no | `2.0` | Base seconds between upload retries. |
+| `llm` | object | no | omitted (ranking off) | Optional LLM ranking/filtering stage. See [Optional LLM ranking](#optional-llm-ranking). |
 
 The example at `config/config.example.json` is deliberately minimal: it sets only the required fields plus six pre-configured RSS feeds, and relies on defaults for everything else.
 
 ### Output filename
 
 Every build writes a single file at `<output_dir>/renewsable-YYYY-MM-DD.epub`. Re-running on the same date overwrites the previous file in place; the upload uses `rmapi put --force` so the cloud copy is replaced too.
+
+## Optional LLM ranking
+
+By default the digest contains every article the feeds produced. You can
+optionally insert an LLM-based ranking stage that scores each article on
+*relevance to you* — from its title and the feed's short synopsis, plus any
+free-text instructions you supply — and uses those scores to filter and sort
+before the EPUB is built:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "instructions": "Interested in systems, security and AI research. Skip cooking, sport results and corporate PR.",
+    "keep": 30
+  }
+}
+```
+
+That is the whole feature: articles the model marks as irrelevant are dropped,
+the rest are ordered most-interesting-first, and `keep` caps the total.
+
+**The API key lives in the environment, never in the config file.** The config
+only names the variable (`api_key_env`, default `RENEWSABLE_LLM_API_KEY`):
+
+```bash
+export RENEWSABLE_LLM_API_KEY="..."      # for manual runs
+```
+
+For the scheduled run, add it to the unit once so the timer sees it:
+
+```bash
+systemctl --user edit renewsable.service
+# then, in the override:
+#   [Service]
+#   Environment=RENEWSABLE_LLM_API_KEY=...
+```
+
+Any OpenAI-compatible `/chat/completions` endpoint works — set `base_url`
+and `model`. The defaults point at OpenRouter.
+
+### Ranking failures never break the paper
+
+The ranking stage is **fail-open by design**. If the key is missing, the network
+is down, the request times out, or the model returns something unparseable,
+renewsable logs a warning and builds the paper **unfiltered**. A bad ranking
+response can never produce an empty paper or block the daily delivery. This
+mirrors how the rest of the pipeline already treats per-feed and per-image
+failures. Cost is negligible: one batched request per day carrying only titles
+and truncated synopses — never article bodies.
 
 ## Daily operation
 
@@ -283,7 +335,7 @@ per-app namespace under `$XDG_STATE_HOME`). Logs land in
 
 ## Architecture (one-liner)
 
-Single-process Python orchestrator: `Config → Builder (in-process article extraction + ebooklib EPUB assembly) → Uploader (rmapi subprocess)`, scheduled by a `systemd --user` timer whose unit files are rendered and installed by the `Scheduler` component. Full design in `.kiro/specs/epub-output/design.md`; config schema authority in `src/renewsable/config.py` and `config/README.md`.
+Single-process Python orchestrator: `Config → Builder (in-process article extraction + optional LLM ranking + ebooklib EPUB assembly) → Uploader (rmapi subprocess)`, scheduled by a `systemd --user` timer whose unit files are rendered and installed by the `Scheduler` component. Full design in `.kiro/specs/epub-output/design.md`; config schema authority in `src/renewsable/config.py` and `config/README.md`.
 
 ## License
 

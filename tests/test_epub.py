@@ -337,6 +337,148 @@ def test_non_image_content_type_triggers_placeholder(
         assert not [n for n in zf.namelist() if "images/img-" in n]
 
 
+def test_generic_content_type_with_webp_bytes_is_embedded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: Google/Modal CDNs serve real WebP as ``application/octet-stream``.
+
+    The old code rejected any response whose effective MIME was not
+    ``image/*``, so these images were silently swapped for placeholders.
+    Magic-byte sniffing must recognise the payload and embed it.
+    """
+    img_url = (
+        "https://storage.googleapis.com/gweb-uniblog-publish-prod/images/"
+        "gemini_4_neon_table.width-1200.format-webp.webp"
+    )
+    webp_bytes = b"RIFF" + (1234).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00" * 32
+    _install_fake_urlopen(
+        monkeypatch,
+        {img_url: FakeResponse(webp_bytes, content_type="application/octet-stream")},
+    )
+    art = Article(
+        title="Generic content type",
+        html=f'<img src="{img_url}" alt="bench"/>',
+        source_url="https://example.com/a1",
+    )
+    out = tmp_path / "book.epub"
+    epub_mod.assemble(
+        [art],
+        today=datetime.date(2026, 4, 26),
+        output_path=out,
+        ua="renewsable-test/1.0",
+        retries=1,
+        backoff_s=0.0,
+    )
+    with _read_zip(out) as zf:
+        image_names = [n for n in zf.namelist() if "images/img-" in n]
+        assert image_names, f"sniffed webp must be embedded; namelist={zf.namelist()!r}"
+        assert any(n.endswith(".webp") for n in image_names), image_names
+    book = ebooklib_epub.read_epub(str(out))
+    html_items = [it for it in book.get_items() if it.get_type() == 9]
+    blob = b"".join(it.get_content() for it in html_items)
+    assert b"renewsable-missing-image" not in blob
+
+
+def test_generic_content_type_with_png_bytes_is_embedded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A generic ``binary/octet-stream`` header over real PNG bytes must embed."""
+    img_url = "https://modal-cdn.com/blog/images/akshat-bubna.webp"
+    _install_fake_urlopen(
+        monkeypatch,
+        {img_url: FakeResponse(PNG_BYTES, content_type="binary/octet-stream")},
+    )
+    art = Article(
+        title="Generic binary",
+        html=f'<img src="{img_url}" alt="avatar"/>',
+        source_url="https://example.com/a1",
+    )
+    out = tmp_path / "book.epub"
+    epub_mod.assemble(
+        [art],
+        today=datetime.date(2026, 4, 26),
+        output_path=out,
+        ua="renewsable-test/1.0",
+        retries=1,
+        backoff_s=0.0,
+    )
+    with _read_zip(out) as zf:
+        image_names = [n for n in zf.namelist() if "images/img-" in n]
+        assert image_names, f"sniffed png must be embedded; namelist={zf.namelist()!r}"
+        assert any(n.endswith(".png") for n in image_names), image_names
+
+
+def test_missing_content_type_uses_url_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No header at all + a ``.webp`` URL should still embed as image/webp."""
+    img_url = "https://img.example.com/no-header.webp"
+    _install_fake_urlopen(
+        monkeypatch,
+        {img_url: FakeResponse(b"not-a-recognized-magic", content_type="")},
+    )
+    art = Article(
+        title="No header",
+        html=f'<img src="{img_url}" alt="x"/>',
+        source_url="https://example.com/a1",
+    )
+    out = tmp_path / "book.epub"
+    epub_mod.assemble(
+        [art],
+        today=datetime.date(2026, 4, 26),
+        output_path=out,
+        ua="renewsable-test/1.0",
+        retries=1,
+        backoff_s=0.0,
+    )
+    with _read_zip(out) as zf:
+        image_names = [n for n in zf.namelist() if "images/img-" in n]
+        assert image_names, f"URL-extension fallback must embed; namelist={zf.namelist()!r}"
+        assert any(n.endswith(".webp") for n in image_names), image_names
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        (b"\x89PNG\r\n\x1a\n\x00\x00", "image/png"),
+        (b"\xff\xd8\xff\xe0rest", "image/jpeg"),
+        (b"GIF89a\x01\x00", "image/gif"),
+        (b"GIF87a\x01\x00", "image/gif"),
+        (b"BM\x00\x00", "image/bmp"),
+    ],
+)
+def test_sniff_image_mime_signatures(body: bytes, expected: str) -> None:
+    assert epub_mod._sniff_image_mime(body) == expected
+
+
+def test_sniff_image_mime_webp_and_unknown() -> None:
+    webp = b"RIFF" + (8).to_bytes(4, "little") + b"WEBPVP8 "
+    assert epub_mod._sniff_image_mime(webp) == "image/webp"
+    assert epub_mod._sniff_image_mime(b"<html>not an image</html>") is None
+
+
+def test_specific_non_image_header_with_image_bytes_still_embeds() -> None:
+    """A mislabelled ``text/html`` header over real PNG bytes must not drop it."""
+    assert (
+        epub_mod._effective_image_mime(PNG_BYTES, "https://x/y", "text/html; charset=utf-8")
+        == "image/png"
+    )
+    # ...but genuine HTML stays rejected.
+    assert (
+        epub_mod._effective_image_mime(
+            b"<html>nope</html>", "https://x/y", "text/html"
+        )
+        is None
+    )
+
+
+def test_image_content_type_header_takes_precedence() -> None:
+    assert (
+        epub_mod._effective_image_mime(b"whatever", "https://x/y.webp", "image/jpeg")
+        == "image/jpeg"
+    )
+
+
 def test_image_dedup_across_articles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -98,11 +98,18 @@ class Article:
 
     ``html`` is sanitized fragment HTML whose ``<img src>`` and ``<a href>``
     values are absolute http(s) URLs.
+
+    ``synopsis`` is the feed-supplied short description (plain text, whitespace
+    collapsed, tag-stripped). It is carried for downstream use — the optional
+    LLM ranking stage in :mod:`renewsable.ranking` scores articles on
+    title + synopsis — and is never rendered into the EPUB. It may be an empty
+    string when the feed provided no usable description.
     """
 
     title: str
     html: str
     source_url: str
+    synopsis: str = ""
 
 
 def collect(
@@ -232,7 +239,12 @@ def _build_article(
 
         clean_title = (title or "").strip() or "(untitled)"
         deduplicated = _strip_duplicate_title_h1(sanitized, clean_title)
-        return Article(title=clean_title, html=deduplicated, source_url=link)
+        return Article(
+            title=clean_title,
+            html=deduplicated,
+            source_url=link,
+            synopsis=_synopsis_text(entry),
+        )
     except Exception as exc:  # belt-and-braces: per-entry never raises out
         logger.warning(
             "unexpected error processing entry %r: %s",
@@ -359,6 +371,36 @@ def _normalize_trafilatura_output(html: str) -> str:
         return _inner_html(html_elements[0])
 
     return html
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_NEWLINE_RE = re.compile(r"\s+")
+
+
+def _synopsis_text(entry: object) -> str:
+    """Return a plain-text synopsis for ``entry`` (never raises, may be "").
+
+    Reuses :func:`_rss_fallback_html` for field selection (``summary_detail``
+    → ``summary`` → ``content[0]``), then reduces whatever it returns to a
+    single line of text: markup is stripped and all whitespace runs collapse
+    to one space. Feed summaries are routinely HTML fragments, so a raw
+    ``summary_detail.value`` is not usable as a prompt line without this.
+
+    This helper shares :func:`_rss_fallback_html`'s *field selection* only; the
+    RSS body fallback path still receives the unmodified markup, so this
+    cannot regress article rendering.
+    """
+    raw = _rss_fallback_html(entry)
+    if not raw:
+        return ""
+    try:
+        if "<" in raw and ">" in raw:
+            fragment = lxml.html.fragment_fromstring(raw, create_parent="div")
+            raw = fragment.text_content()
+    except Exception:
+        # Parsing is best-effort: fall back to a tag-strip on the raw string.
+        raw = _TAG_RE.sub(" ", raw)
+    return _NEWLINE_RE.sub(" ", raw).strip()
 
 
 def _rss_fallback_html(entry: object) -> str:

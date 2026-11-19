@@ -30,12 +30,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import os
 import zipfile
 from pathlib import Path
 
 from . import articles as articles_mod
 from . import epub as epub_mod
 from . import http as http_mod  # noqa: F401  (alias kept for tests)
+from . import ranking as ranking_mod
 from .config import Config
 from .errors import BuildError
 
@@ -112,6 +114,26 @@ class Builder:
                     "failed to fetch or contained no usable entries"
                 ),
             )
+
+        # Optional LLM ranking: filters + sorts by judged relevance. This step
+        # is deliberately fail-open — any problem (disabled, missing key,
+        # network, malformed output) returns the list unchanged and the paper
+        # is still built. It is therefore *not* wrapped in a try/except here;
+        # ``ranking.rank`` owns that contract and never raises.
+        if cfg.llm is not None and cfg.llm.enabled:
+            # The API key comes from the environment, never the config file.
+            api_key = os.environ.get(cfg.llm.api_key_env, "").strip()
+            ranked = ranking_mod.rank(articles, llm=cfg.llm, api_key=api_key or None)
+            if ranked:
+                articles = ranked
+            else:
+                # Defensive: a pathological ranking outcome must not turn into
+                # an empty paper. ``rank`` only returns an empty list for an
+                # empty input, but guard so a future change there cannot
+                # silently kill the run.
+                logger.warning(
+                    "llm ranking left no articles; building the paper unfiltered"
+                )
 
         epub_mod.assemble(
             articles,

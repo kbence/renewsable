@@ -574,3 +574,173 @@ class TestStoriesSchemaRejections:
             stories=["https://x/y"],
             must_contain=["stories[0]"],
         )
+
+
+# ---------------------------------------------------------------------------
+# LLM ranking block (optional)
+# ---------------------------------------------------------------------------
+
+
+class TestLlmBlockHappyPath:
+    """The `llm` block is optional; when absent, ranking is off."""
+
+    def test_absent_llm_block_yields_none(self, fake_home, tmp_path):
+        cfg_path = _write_json(tmp_path / "cfg.json", _payload_with())
+        assert Config.load(cfg_path).llm is None
+
+    def test_minimal_enable_uses_documented_defaults(self, fake_home, tmp_path):
+        cfg_path = _write_json(
+            tmp_path / "cfg.json", _payload_with(llm={"enabled": True})
+        )
+        llm = Config.load(cfg_path).llm
+        assert llm is not None
+        assert llm.enabled is True
+        assert llm.base_url.startswith("https://")
+        assert llm.model
+        assert llm.api_key_env == "RENEWSABLE_LLM_API_KEY"
+        assert llm.instructions == ""
+        assert llm.keep is None
+        assert llm.timeout_s > 0
+
+    def test_full_block_round_trips(self, fake_home, tmp_path):
+        cfg_path = _write_json(
+            tmp_path / "cfg.json",
+            _payload_with(
+                llm={
+                    "enabled": True,
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "model": "some/model",
+                    "api_key_env": "MY_KEY",
+                    "instructions": "skip recipes and PR puff pieces",
+                    "keep": 25,
+                    "timeout_s": 30,
+                }
+            ),
+        )
+        llm = Config.load(cfg_path).llm
+        assert llm.model == "some/model"
+        assert llm.api_key_env == "MY_KEY"
+        assert llm.keep == 25
+        assert llm.timeout_s == 30.0
+
+    def test_disabled_block_is_preserved_as_disabled(self, fake_home, tmp_path):
+        cfg_path = _write_json(
+            tmp_path / "cfg.json", _payload_with(llm={"enabled": False})
+        )
+        llm = Config.load(cfg_path).llm
+        assert llm is not None and llm.enabled is False
+
+
+class TestLlmBlockRejections:
+    """Each violation names the file path and the offending `llm.*` field."""
+
+    def _expect_error(self, fake_home, tmp_path, llm, *, must_contain):
+        cfg_path = _write_json(tmp_path / "cfg.json", _payload_with(llm=llm))
+        with pytest.raises(ConfigError) as ei:
+            Config.load(cfg_path)
+        message = ei.value.message
+        assert str(cfg_path) in message, (
+            f"error must name config file path; got {message!r}"
+        )
+        for sub in must_contain:
+            assert sub in message, f"error must mention {sub!r}; got {message!r}"
+
+    def test_rejects_non_dict_llm(self, fake_home, tmp_path):
+        self._expect_error(
+            fake_home, tmp_path, "yes", must_contain=["llm", "object"]
+        )
+
+    def test_rejects_unknown_llm_key(self, fake_home, tmp_path):
+        self._expect_error(
+            fake_home,
+            tmp_path,
+            {"enabled": True, "api_key": "sk-secret"},
+            must_contain=["llm.api_key", "unknown"],
+        )
+
+    @pytest.mark.parametrize("bad", ["true", 1, None])
+    def test_rejects_non_bool_enabled(self, fake_home, tmp_path, bad):
+        """Includes JSON ``null``: an explicit-but-ambiguous value is an error."""
+        self._expect_error(
+            fake_home, tmp_path, {"enabled": bad}, must_contain=["llm.enabled"]
+        )
+
+    @pytest.mark.parametrize("bad", ["ftp://x/y", "openrouter.ai", ""])
+    def test_rejects_bad_base_url(self, fake_home, tmp_path, bad):
+        self._expect_error(
+            fake_home, tmp_path, {"base_url": bad}, must_contain=["llm.base_url"]
+        )
+
+    @pytest.mark.parametrize("bad", ["", "   ", 5])
+    def test_rejects_bad_model(self, fake_home, tmp_path, bad):
+        self._expect_error(
+            fake_home, tmp_path, {"model": bad}, must_contain=["llm.model"]
+        )
+
+    @pytest.mark.parametrize("bad", ["", "has space", "1LEADING", "sk-abc-123!"])
+    def test_rejects_implausible_api_key_env(self, fake_home, tmp_path, bad):
+        """Catches pasting an actual key instead of naming a variable."""
+        self._expect_error(
+            fake_home, tmp_path, {"api_key_env": bad}, must_contain=["api_key_env"]
+        )
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "5"])
+    def test_rejects_bad_keep(self, fake_home, tmp_path, bad):
+        self._expect_error(
+            fake_home, tmp_path, {"keep": bad}, must_contain=["llm.keep"]
+        )
+
+    @pytest.mark.parametrize("bad", [0, -5, True, "30"])
+    def test_rejects_bad_timeout(self, fake_home, tmp_path, bad):
+        self._expect_error(
+            fake_home, tmp_path, {"timeout_s": bad}, must_contain=["llm.timeout_s"]
+        )
+
+    def test_rejects_non_string_instructions(self, fake_home, tmp_path):
+        self._expect_error(
+            fake_home, tmp_path, {"instructions": ["a", "b"]}, must_contain=["instructions"]
+        )
+
+
+class TestLlmIsOptional:
+    """The `llm` block must be entirely opt-in: absent means disabled, and no
+    pre-existing config (or the shipped example) needs editing to keep working.
+    """
+
+    def test_shipped_example_config_has_no_llm_block(self, fake_home):
+        """The example must stay minimal; no inert trace of the feature."""
+        import json as _json
+
+        example = Path(__file__).parents[1] / "config" / "config.example.json"
+        raw = _json.loads(example.read_text(encoding="utf-8"))
+        assert "llm" not in raw, (
+            "config.example.json should not ship an llm block: the feature is "
+            "opt-in and the example is documented as deliberately minimal"
+        )
+
+    def test_shipped_example_config_loads_without_llm(self, fake_home):
+        example = Path(__file__).parents[1] / "config" / "config.example.json"
+        cfg = Config.load(example)
+        assert cfg.llm is None
+
+    def test_no_llm_key_at_all(self, fake_home, tmp_path):
+        cfg_path = _write_json(tmp_path / "cfg.json", _payload_with())
+        cfg = Config.load(cfg_path)
+        assert cfg.llm is None
+
+    def test_dataclass_requires_no_llm_argument(self, fake_home, tmp_path):
+        """Direct construction without `llm` keeps working (no positional break)."""
+        cfg = Config(
+            stories=[{"provider": "rss", "config": {"rss_path": "https://x/y"}}],
+            output_dir=tmp_path,
+            log_dir=tmp_path,
+        )
+        assert cfg.llm is None
+
+    def test_zero_argument_construction(self):
+        assert Config().llm is None
+
+    def test_llm_default_is_disabled_even_when_constructed_directly(self):
+        from renewsable.config import LlmConfig
+
+        assert LlmConfig().enabled is False

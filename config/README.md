@@ -49,10 +49,52 @@ message; remove them when migrating an old config.
 | `feed_fetch_backoff_s` | number > 0       | no       | `1.0`                                    | Base seconds between feed-fetch retries (exponential, capped internally).|
 | `upload_retries`       | integer > 0      | no       | `3`                                      | How many times a failing reMarkable upload is retried.                   |
 | `upload_backoff_s`     | number > 0       | no       | `2.0`                                    | Base seconds between upload retries.                                     |
+| `llm`                  | object           | no       | omitted (ranking off)                    | Optional LLM ranking/filtering. See [below](#llm--optional-ranking).     |
 
 `output_dir` is intentionally **absent** from the example so the default XDG
 location is exercised; uncomment (i.e. add) the key only if you need a custom
 path.
+
+## `llm` — optional ranking
+
+When present **and** `enabled: true`, renewsable sends the title and a short
+synopsis of every collected article to an OpenAI-compatible
+`/chat/completions` endpoint, together with your free-text `instructions`, and
+uses the returned scores to filter and re-order the day's articles before the
+EPUB is assembled. Omit the block entirely to keep the old behaviour.
+
+This stage is **fail-open**: if the API key is missing, the network is down,
+the request times out, or the model returns something unparseable, the paper is
+built anyway, unfiltered. A ranking problem can never stop delivery.
+
+| Field          | Type             | Required | Default                                  | Meaning                                                                 |
+|----------------|------------------|----------|------------------------------------------|-------------------------------------------------------------------------|
+| `enabled`      | bool             | no       | `false`                                  | Master switch. The block can be present but dormant.                     |
+| `base_url`     | string (URL)     | no       | `https://openrouter.ai/api/v1`           | Base URL of an OpenAI-compatible API. `/chat/completions` is appended.   |
+| `model`        | string           | no       | `deepseek/deepseek-v4.1-flash`           | Model identifier as the provider names it.                               |
+| `api_key_env`  | string           | no       | `RENEWSABLE_LLM_API_KEY`                 | **Name of the environment variable** holding the key. Never the key itself. |
+| `instructions` | string           | no       | `""`                                     | Free-text guidance, e.g. `"skip recipes and PR puff pieces"`.             |
+| `keep`         | integer > 0      | no       | unlimited                                | Cap the number of articles in the final paper.                           |
+| `timeout_s`    | number > 0       | no       | `60.0`                                   | Per-request timeout.                                                     |
+
+> **The API key is never written to this file.** `api_key_env` names an
+> environment variable; renewsable reads the key from the process environment at
+> build time. This keeps a config file that is often committed to git free of
+> credentials. For the systemd timer, set it once with
+> `systemctl --user edit renewsable.service` and an
+> `Environment=RENEWSABLE_LLM_API_KEY=...` line (or an `EnvironmentFile=`).
+
+Minimal example:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "instructions": "I care about systems, security and AI research. Skip cooking, sport results and corporate PR.",
+    "keep": 30
+  }
+}
+```
 
 ## `stories` — RSS feed source schema
 

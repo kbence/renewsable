@@ -879,3 +879,96 @@ def test_strip_duplicate_h1_with_empty_title_is_noop() -> None:
     body = "<div><h1>Some Heading</h1><p>body</p></div>"
     assert articles_mod._strip_duplicate_title_h1(body, "") == body
     assert articles_mod._strip_duplicate_title_h1(body, "   ") == body
+
+
+# ---------------------------------------------------------------------------
+# Synopsis capture (used by the optional LLM ranking stage)
+# ---------------------------------------------------------------------------
+
+
+def test_synopsis_captured_from_rss_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The feed's short description is carried on the Article for ranking."""
+    feed_bytes = b"<rss>fake</rss>"
+    article_html = (
+        "<html><body><article><h1>Hello</h1>"
+        "<p>"
+        + "Real article body content, long enough to be extracted cleanly. " * 6
+        + "</p></article></body></html>"
+    )
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/articles/hello"
+    feed = _FakeFeed(
+        [{"title": "Hello", "link": art_url, "summary": "A short teaser \n for the story"}]
+    )
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+    out = articles_mod.collect(
+        [_story(rss_url)], ua="ua", retries=1, backoff_s=0.0, robots_cache={}
+    )
+    assert out
+    # Whitespace is collapsed to a single line; markup is not included.
+    assert out[0].synopsis == "A short teaser for the story"
+
+
+def test_synopsis_strips_markup_from_html_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Summaries are routinely HTML fragments; the synopsis must be plain text."""
+    feed_bytes = b"<rss>fake</rss>"
+    article_html = (
+        "<html><body><article><h1>Hello</h1><p>"
+        + "Body prose that is long enough to score well for extraction. " * 6
+        + "</p></article></body></html>"
+    )
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/articles/hello"
+    feed = _FakeFeed(
+        [
+            {
+                "title": "Hello",
+                "link": art_url,
+                "summary": "<p>Teaser with <b>bold</b> text</p>",
+            }
+        ]
+    )
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+    out = articles_mod.collect(
+        [_story(rss_url)], ua="ua", retries=1, backoff_s=0.0, robots_cache={}
+    )
+    assert out[0].synopsis == "Teaser with bold text"
+
+
+def test_synopsis_empty_when_feed_has_no_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feed_bytes = b"<rss>fake</rss>"
+    article_html = (
+        "<html><body><article><h1>Hello</h1><p>"
+        + "Body prose that is long enough to score well for extraction. " * 6
+        + "</p></article></body></html>"
+    )
+    rss_url = "https://example.com/feed.xml"
+    art_url = "https://example.com/articles/hello"
+    feed = _FakeFeed([{"title": "Hello", "link": art_url, "summary": ""}])
+    _install_fakes(
+        monkeypatch,
+        fetch_map={rss_url: feed_bytes, art_url: article_html.encode()},
+        feed_map={feed_bytes: feed},
+    )
+    out = articles_mod.collect(
+        [_story(rss_url)], ua="ua", retries=1, backoff_s=0.0, robots_cache={}
+    )
+    assert out[0].synopsis == ""
+
+
+def test_synopsis_defaults_to_empty_string() -> None:
+    """Article stays constructible without a synopsis (back-compat)."""
+    art = articles_mod.Article(title="t", html="<p>x</p>", source_url="https://x/y")
+    assert art.synopsis == ""

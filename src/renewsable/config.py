@@ -54,7 +54,7 @@ from . import paths
 from .errors import ConfigError
 
 
-__all__ = ["Config"]
+__all__ = ["Config", "LlmConfig"]
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,12 @@ logger = logging.getLogger(__name__)
 # regex to ``^\d{2}:\d{2}$``. ``datetime.time.fromisoformat`` provides the
 # range check (00-23 / 00-59) so we do not duplicate it here.
 _SCHEDULE_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+
+
+# Environment-variable name for ``llm.api_key_env``. Not a general shell
+# identifier grammar — just enough to catch the common mistake of pasting an
+# actual API key into the field instead of naming one.
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 # Fields whose values are paths and therefore need ``~`` expansion plus
@@ -86,6 +92,49 @@ _STORIES_SCHEMA_REMEDIATION = (
     '{"provider": "rss", "config": {"rss_path": "<http(s) URL>", '
     '"limit": <optional positive int>}}'
 )
+
+
+# LLM Ranking Schema (optional). A closed-set object; every key is optional so
+# `{"enabled": true}` alone is valid. ``api_key_env`` names an *environment
+# variable* — the key itself is never stored in the config file. See
+# `renewsable.ranking` for the consumer.
+_LLM_KEYS: frozenset[str] = frozenset(
+    {
+        "enabled",
+        "base_url",
+        "model",
+        "api_key_env",
+        "instructions",
+        "keep",
+        "timeout_s",
+    }
+)
+_LLM_SCHEMA_REMEDIATION = (
+    'the "llm" block accepts the keys '
+    '{"enabled": <bool>, "base_url": "<http(s) URL>", "model": "<name>", '
+    '"api_key_env": "<ENV_VAR_NAME>", "instructions": "<free text>", '
+    '"keep": <optional positive int>, "timeout_s": <optional positive number>} '
+    "and the API key itself is never written to this file"
+)
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    """Optional LLM-based article ranking settings.
+
+    Disabled by default, so an existing config without an ``llm`` block
+    behaves exactly as before. ``api_key_env`` deliberately holds the *name*
+    of an environment variable rather than a key: the config file is
+    human-edited and often committed, so it must never carry a credential.
+    """
+
+    enabled: bool = False
+    base_url: str = "https://openrouter.ai/api/v1"
+    model: str = "deepseek/deepseek-v4.1-flash"
+    api_key_env: str = "RENEWSABLE_LLM_API_KEY"
+    instructions: str = ""
+    keep: int | None = None
+    timeout_s: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -113,6 +162,7 @@ class Config:
     feed_fetch_backoff_s: float = 1.0
     upload_retries: int = 3
     upload_backoff_s: float = 2.0
+    llm: LlmConfig | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -296,6 +346,8 @@ _TYPE_RULES: dict[str, tuple[str, tuple[type, ...]]] = {
     "feed_fetch_backoff_s": ("number", (int, float)),
     "upload_retries": ("integer", (int,)),
     "upload_backoff_s": ("number", (int, float)),
+# Nested object; deep validation lives in _build_llm_config.
+    "llm": ("object", (dict,)),
     # Path fields accept a string (file path) only.
     "output_dir": ("string (filesystem path)", (str,)),
     "log_dir": ("string (filesystem path)", (str,)),
@@ -342,6 +394,11 @@ def _coerce_field(cfg_path: Path, name: str, value: Any) -> Any:
         # is the default).
         return Path(value).expanduser().resolve()
 
+    if name == "llm":
+        # Deep-validate the nested block and turn it into an LlmConfig here,
+        # so ``Config.llm`` is always a typed object (never a raw dict).
+        return _build_llm_config(cfg_path, value)
+
     # Pass-through for everything else; the dataclass holds the value
     # verbatim. ``stories`` deeper validation happens in ``Config.validate``
     # (Stories Schema, design.md).
@@ -362,6 +419,84 @@ def _apply_defaults(kwargs: dict[str, Any]) -> dict[str, Any]:
     if "log_dir" not in kwargs:
         kwargs["log_dir"] = paths.default_log_dir()
     return kwargs
+
+
+def _build_llm_config(cfg_path: Path, value: dict) -> LlmConfig:
+    """Validate the ``llm`` block and return an :class:`LlmConfig`.
+
+    Closed-set keys, per-field types, and cross-field invariants (http(s)
+    ``base_url``, non-empty ``model``, a plausible env-var name, positive
+    ``keep`` / ``timeout_s``). Every error names the config file and the
+    offending field, consistent with the rest of the loader.
+    """
+    where = str(cfg_path)
+
+    def fail(field: str, detail: str) -> "ConfigError":
+        return ConfigError(
+            f"config field 'llm.{field}' in {where}: {detail}",
+            remediation=_LLM_SCHEMA_REMEDIATION,
+        )
+
+    extra = set(value.keys()) - _LLM_KEYS
+    if extra:
+        raise fail(
+            sorted(extra)[0],
+            f"unknown key; allowed keys are {sorted(_LLM_KEYS)!r}",
+        )
+
+    enabled = value.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise fail("enabled", f"expected bool, got {type(enabled).__name__}")
+
+    base_url = value.get("base_url", LlmConfig.base_url)
+    if not isinstance(base_url, str) or not (
+        base_url.startswith("http://") or base_url.startswith("https://")
+    ):
+        raise fail("base_url", f"expected an http:// or https:// URL, got {base_url!r}")
+
+    model = value.get("model", LlmConfig.model)
+    if not isinstance(model, str) or not model.strip():
+        raise fail("model", f"expected a non-empty string, got {model!r}")
+
+    api_key_env = value.get("api_key_env", LlmConfig.api_key_env)
+    if not isinstance(api_key_env, str) or not api_key_env.strip():
+        raise fail(
+            "api_key_env",
+            f"expected the name of an environment variable, got {api_key_env!r}",
+        )
+    if not _ENV_VAR_NAME_RE.match(api_key_env):
+        raise fail(
+            "api_key_env",
+            f"expected an environment variable name (letters, digits, underscore; "
+            f"not starting with a digit), got {api_key_env!r} — the API key "
+            f"itself must never be written here",
+        )
+
+    instructions = value.get("instructions", "")
+    if not isinstance(instructions, str):
+        raise fail(
+            "instructions", f"expected a string, got {type(instructions).__name__}"
+        )
+
+    keep = value.get("keep", None)
+    if keep is not None:
+        # Reject bool first because bool is a subclass of int.
+        if isinstance(keep, bool) or not isinstance(keep, int) or keep <= 0:
+            raise fail("keep", f"expected a positive integer or null, got {keep!r}")
+
+    timeout_s = value.get("timeout_s", LlmConfig.timeout_s)
+    if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
+        raise fail("timeout_s", f"expected a positive number, got {timeout_s!r}")
+
+    return LlmConfig(
+        enabled=enabled,
+        base_url=base_url,
+        model=model,
+        api_key_env=api_key_env,
+        instructions=instructions,
+        keep=keep,
+        timeout_s=float(timeout_s),
+    )
 
 
 def _validate_story_entry(where: str, index: int, story: Any) -> None:
