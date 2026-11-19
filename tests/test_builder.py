@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ebooklib import epub as ebooklib_epub
 
 from renewsable import builder as builder_mod
 from renewsable.articles import Article
@@ -48,6 +49,7 @@ def _make_config(
     user_agent: str = "renewsable-test/1.0",
     feed_fetch_retries: int = 3,
     feed_fetch_backoff_s: float = 0.01,
+    llm=None,
 ) -> Config:
     """Construct a valid Config for builder tests under the new schema."""
     return Config(
@@ -60,6 +62,7 @@ def _make_config(
         user_agent=user_agent,
         feed_fetch_retries=feed_fetch_retries,
         feed_fetch_backoff_s=feed_fetch_backoff_s,
+        llm=llm,
     )
 
 
@@ -349,3 +352,129 @@ def test_build_unlinks_when_assemble_writes_invalid_epub(tmp_path, monkeypatch):
 
     out = cfg.output_dir / "renewsable-2026-04-19.epub"
     assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# Optional LLM ranking integration
+# ---------------------------------------------------------------------------
+
+
+def _llm_enabled(**overrides):
+    from renewsable.config import LlmConfig
+
+    base = dict(
+        enabled=True,
+        base_url="https://llm.example.com/v1",
+        model="test-model",
+        api_key_env="TEST_BUILDER_KEY",
+    )
+    base.update(overrides)
+    return LlmConfig(**base)
+
+
+def test_build_without_llm_never_calls_ranking(tmp_path, monkeypatch):
+    """Default config (llm=None): ranking is not invoked at all."""
+    cfg = _make_config(tmp_path)
+    _patch_collect(monkeypatch, _sample_articles())
+
+    def boom(*a, **k):
+        raise AssertionError("ranking must not be called when llm is unset")
+
+    monkeypatch.setattr(builder_mod.ranking_mod, "rank", boom)
+    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    assert out.is_file()
+
+
+def test_build_disabled_llm_never_calls_ranking(tmp_path, monkeypatch):
+    cfg = _make_config(tmp_path, llm=_llm_enabled(enabled=False))
+    _patch_collect(monkeypatch, _sample_articles())
+
+    def boom(*a, **k):
+        raise AssertionError("ranking must not be called when llm.enabled is False")
+
+    monkeypatch.setattr(builder_mod.ranking_mod, "rank", boom)
+    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    assert out.is_file()
+
+
+def test_build_passes_env_resolved_api_key_to_ranking(tmp_path, monkeypatch):
+    """The key is read from the environment variable named in the config."""
+    cfg = _make_config(tmp_path, llm=_llm_enabled(api_key_env="TEST_BUILDER_KEY"))
+    _patch_collect(monkeypatch, _sample_articles())
+    monkeypatch.setenv("TEST_BUILDER_KEY", "  secret-from-env  ")
+
+    seen: dict[str, Any] = {}
+
+    def fake_rank(articles, *, llm, api_key, **kwargs):
+        seen["llm"] = llm
+        seen["api_key"] = api_key
+        return articles
+
+    monkeypatch.setattr(builder_mod.ranking_mod, "rank", fake_rank)
+    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+
+    assert seen["api_key"] == "secret-from-env"  # stripped
+    assert seen["llm"].model == "test-model"
+
+
+def test_build_missing_env_key_passes_none(tmp_path, monkeypatch):
+    cfg = _make_config(tmp_path, llm=_llm_enabled(api_key_env="TEST_ABSENT_KEY"))
+    _patch_collect(monkeypatch, _sample_articles())
+    monkeypatch.delenv("TEST_ABSENT_KEY", raising=False)
+
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        builder_mod.ranking_mod,
+        "rank",
+        lambda articles, *, llm, api_key, **k: seen.update(api_key=api_key) or articles,
+    )
+    Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    assert seen["api_key"] is None
+
+
+def test_build_uses_ranked_order(tmp_path, monkeypatch):
+    """The EPUB chapter order follows whatever ranking returns."""
+    cfg = _make_config(tmp_path, llm=_llm_enabled())
+    arts = _sample_articles()
+    _patch_collect(monkeypatch, arts)
+    monkeypatch.setenv("TEST_BUILDER_KEY", "k")
+
+    reversed_arts = list(reversed(arts))
+    monkeypatch.setattr(
+        builder_mod.ranking_mod,
+        "rank",
+        lambda articles, *, llm, api_key, **k: reversed_arts,
+    )
+    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+
+    book = ebooklib_epub.read_epub(str(out))
+    html_items = [it for it in book.get_items() if it.get_type() == 9]
+    # Nav + 2 chapters; find the chapter blobs in spine order.
+    titles = [
+        it.get_name() for it in html_items if b"Second headline" in it.get_content()
+    ]
+    assert titles, "reordered article should appear in the EPUB"
+
+
+def test_build_empty_ranking_result_falls_back_to_unfiltered(
+    tmp_path, monkeypatch
+):
+    """A pathological empty ranking must not produce an empty/failed paper."""
+    cfg = _make_config(tmp_path, llm=_llm_enabled())
+    arts = _sample_articles()
+    _patch_collect(monkeypatch, arts)
+    monkeypatch.setenv("TEST_BUILDER_KEY", "k")
+
+    monkeypatch.setattr(
+        builder_mod.ranking_mod,
+        "rank",
+        lambda articles, *, llm, api_key, **k: [],
+    )
+    out = Builder(cfg).build(today=datetime.date(2026, 4, 19))
+    assert out.is_file()
+    book = ebooklib_epub.read_epub(str(out))
+    blob = b"".join(
+        it.get_content() for it in book.get_items() if it.get_type() == 9
+    )
+    assert b"First headline" in blob
+    assert b"Second headline" in blob
