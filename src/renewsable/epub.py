@@ -70,9 +70,44 @@ _XHTML_WRAPPER = (
 # leave typography (font, size, line-height) to the reader's preferences.
 _DEFAULT_STYLESHEET = "h1, h2, h3, h4, h5, h6 { text-align: left; }\n"
 
-# Image-fetch policy: a successful fetch must yield bytes whose effective
-# MIME type is image/*. Anything else is treated as a fetch failure.
+# Image-fetch policy: a successful fetch must yield bytes that *are* an
+# image. The MIME type is taken from the ``Content-Type`` response header when
+# it names an image; otherwise we fall back to magic-byte sniffing and then the
+# URL extension, because a growing number of CDNs (Google's
+# ``storage.googleapis.com`` ``gweb-uniblog-publish-prod`` bucket, Modal's
+# ``modal-cdn.com``, ...) serve real WebP/PNG/JPEG bytes with a generic
+# ``application/octet-stream`` or ``binary/octet-stream`` header. Treating a
+# declared-but-generic type as "not an image" silently dropped those images
+# and replaced them with the placeholder; sniffing the payload instead keeps
+# them. A response that is neither labelled as an image nor recognisable as
+# image bytes is still rejected.
 _IMAGE_MIME_PREFIX = "image/"
+
+# ``Content-Type`` values that are too vague to trust either way. When we see
+# one of these we ignore it and fall through to URL-extension / magic-byte
+# detection. Compare against the bare type, lowercased.
+_GENERIC_CONTENT_TYPES = frozenset(
+    {
+        "",
+        "application/octet-stream",
+        "binary/octet-stream",
+        "application/binary",
+        "application/x-unknown",
+        "unknown/unknown",
+    }
+)
+
+# Magic-byte signatures for the raster/vector image formats we expect to see
+# in the wild. Each entry is (byte prefix, MIME type). ``RIFF????WEBP`` is
+# handled separately because of the length field between the two markers.
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+    (b"\x00\x00\x01\x00", "image/x-icon"),
+)
 
 
 def assemble(
@@ -298,9 +333,15 @@ def _fetch_image_with_mime(
     """Fetch ``url`` returning ``(body, mime)`` on success or ``None`` on failure.
 
     "Failure" covers: any exception from urlopen across all retries, body
-    that exceeds ``max_bytes``, a non-image effective MIME type. Retries
+    that exceeds ``max_bytes``, and a response that is not an image. Retries
     follow the same exponential backoff schedule as ``http.fetch_with_retry``
     so that operators see a single, predictable network policy.
+
+    The effective MIME type is resolved by :func:`_effective_image_mime`,
+    which trusts an image ``Content-Type`` header, ignores a generic one
+    (``application/octet-stream`` and friends), and otherwise falls back to
+    URL extension and magic-byte sniffing. A response that is neither labelled
+    as an image nor recognisable as image bytes is rejected.
     """
     retries = max(1, retries)
     last_exc: Exception | None = None
@@ -322,13 +363,14 @@ def _fetch_image_with_mime(
                 if headers is not None:
                     raw = headers.get("Content-Type") if hasattr(headers, "get") else None
                     if isinstance(raw, str):
-                        content_type = raw.split(";")[0].strip().lower()
-                mime = content_type or _mime_from_url(url)
-                if not mime.startswith(_IMAGE_MIME_PREFIX):
+                        content_type = raw
+                mime = _effective_image_mime(body, url, content_type)
+                if mime is None:
                     logger.info(
-                        "image %s has non-image content-type %r; treating as failure",
+                        "image %s has non-image content-type %r and no image bytes "
+                        "were recognized; treating as failure",
                         url,
-                        mime,
+                        content_type.split(";")[0].strip().lower() or content_type,
                     )
                     return None
                 return body, mime
@@ -351,6 +393,65 @@ def _mime_from_url(url: str) -> str:
     """Fallback MIME guess from URL path extension."""
     guessed, _ = mimetypes.guess_type(url)
     return (guessed or "").lower()
+
+
+def _sniff_image_mime(body: bytes) -> str | None:
+    """Return the MIME type implied by ``body``'s magic bytes, or ``None``.
+
+    Covers the common raster formats plus ICO. Deliberately conservative:
+    anything that does not match a known signature returns ``None`` so the
+    caller can keep the "not an image" outcome rather than guessing.
+    """
+    for signature, mime in _IMAGE_SIGNATURES:
+        if body.startswith(signature):
+            return mime
+    # WebP: ``RIFF`` + 4-byte little-endian length + ``WEBP``.
+    if len(body) >= 12 and body[:4] == b"RIFF" and body[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _effective_image_mime(body: bytes, url: str, content_type: str) -> str | None:
+    """Resolve the MIME type to embed for a fetched image, or ``None`` to reject.
+
+    Precedence:
+
+    1. A ``Content-Type`` header that already names an image (``image/*``) is
+       trusted verbatim — this is the fast path and matches the original
+       behaviour.
+    2. A *specific* non-image header (e.g. ``text/html``, ``application/pdf``)
+       still has a chance if the payload's magic bytes say image, but is
+       otherwise rejected. (Real CDNs occasionally mislabel a valid image, so
+       sniffing before rejecting is strictly more forgiving and never turns a
+       good image into a placeholder.)
+    3. A generic header (``application/octet-stream`` / empty) or a missing
+       header is resolved by URL extension first, then by magic bytes. This is
+       the fix for headers like Google's and Modal's that serve real images
+       with a generic type.
+
+    Returns the chosen MIME string, or ``None`` when the response is not an
+    image and must be replaced with the placeholder.
+    """
+    declared = (content_type or "").split(";")[0].strip().lower()
+
+    if declared.startswith(_IMAGE_MIME_PREFIX):
+        return declared
+
+    # The bytes are the ground truth when the header is unhelpful. For a
+    # specific non-image header we still sniff (cheap, and avoids dropping a
+    # real image that a misconfigured server labelled ``text/html``).
+    sniffed = _sniff_image_mime(body)
+
+    if declared in _GENERIC_CONTENT_TYPES:
+        if sniffed is not None:
+            return sniffed
+        from_url = _mime_from_url(url)
+        if from_url.startswith(_IMAGE_MIME_PREFIX):
+            return from_url
+        return None
+
+    # A specific content type that is not an image: trust sniffing only.
+    return sniffed
 
 
 def _safe_unlink(path: Path) -> None:
