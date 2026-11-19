@@ -22,14 +22,14 @@
 # Requirements covered: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6.
 #
 # Why no pin?
-#   The Pi-side install-pi.sh pins rmapi to v0.0.32 with an SHA-256, and that
-#   pinned binary is currently broken against the live reMarkable cloud
-#   (sync-v3 invalid hash; fixed upstream in v0.0.33). For a single-operator
+#   The Pi-side install-pi.sh pins rmapi to a specific release with an SHA-256
+#   (currently v0.0.35), and earlier pins were broken against the live
+#   reMarkable cloud for weeks at a time (sync-v3 invalid hash; then the
+#   invalid root schema 400 that only v0.0.35 fixes). For a single-operator
 #   project the failure mode "stuck on a broken pinned binary" has historically
 #   been higher-impact than "upstream release tampered with", so this script
 #   tracks the latest release and trusts the upstream. See research.md and the
-#   design's Boundary Commitments for the full tradeoff write-up. The Pi-side
-#   pin policy is intentionally untouched by this spec.
+#   design's Boundary Commitments for the full tradeoff write-up.
 #
 # Why no Homebrew / sudo / apt?
 #   This script must not mutate system state outside the project's .venv/ and

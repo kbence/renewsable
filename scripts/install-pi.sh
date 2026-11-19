@@ -186,7 +186,7 @@ fi
 log "verifying installation"
 "$VENV_DIR/bin/renewsable" --help >/dev/null \
   || die "renewsable --help failed inside the venv"
-# rmapi's `version` subcommand exists on v0.0.32, but to stay tolerant of
+# rmapi's `version` subcommand exists on v0.0.35, but to stay tolerant of
 # future CLI tweaks we accept any exit status here as long as the binary
 # is executable and responds on stdout or stderr.
 "$RMAPI_BIN" version >/dev/null 2>&1 \
