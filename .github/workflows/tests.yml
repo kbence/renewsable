@@ -7,7 +7,15 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04 rather than ubuntu-latest. The `actions/python-versions`
+    # manifest publishes a Python 3.9 build for 20.04, 22.04 and 24.04 but not
+    # for 26.04, which is what ubuntu-latest now resolves to. On ubuntu-latest
+    # the 3.9 job therefore died in the setup-python step after ~5 seconds
+    # ("The version '3.9' with architecture 'x64' was not found for Ubuntu
+    # 26.04"), before pytest ever ran, while 3.10-3.13 passed. 24.04 carries
+    # every version in the matrix below, so the Bullseye/3.9 floor stays
+    # covered. Revisit when the manifest publishes 3.9 for a newer image.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
