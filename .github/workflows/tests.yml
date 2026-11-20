@@ -7,7 +7,36 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04 rather than ubuntu-latest. The `actions/python-versions`
+    # manifest publishes a Python 3.9 build for 20.04, 22.04 and 24.04 but not
+    # for 26.04, which is what ubuntu-latest now resolves to. On ubuntu-latest
+    # the 3.9 job therefore died in the setup-python step after ~5 seconds
+    # ("The version '3.9' with architecture 'x64' was not found for Ubuntu
+    # 26.04"), before pytest ever ran, while 3.10-3.13 passed. 24.04 carries
+    # every version in the matrix below, so the Bullseye/3.9 floor stays
+    # covered.
+    #
+    # 3.9 is the floor because Raspberry Pi OS Bullseye ships it and Bullseye
+    # is a supported deployment target (see README "Prerequisites" and
+    # scripts/install-pi.sh). Keeping that coverage is the goal; raising the
+    # floor is a last resort. If this pin ever stops working, work down this
+    # ladder before touching `requires-python`:
+    #
+    #   1. Move the pin to a newer image that still has a 3.9 build (check
+    #      actions/python-versions/versions-manifest.json for the
+    #      `platform_version` values attached to 3.9.x).
+    #   2. Keep `runs-on` current and take 3.9 from a source that is not tied
+    #      to the runner image at all — e.g. a container job using the official
+    #      `python:3.9-slim` image (still published), or `uv python install
+    #      3.9`, which uses python-build-standalone rather than GitHub's
+    #      manifest.
+    #   3. Only if 3.9 genuinely cannot be provisioned: raise the floor. That
+    #      means `requires-python`, the `click`/`pytest` caps in
+    #      `pyproject.toml`, dropping 3.9 from this matrix, the README
+    #      prerequisite, and the install-pi.sh version check — and it drops
+    #      Bullseye support, so decide it deliberately rather than as a CI
+    #      side effect.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +55,15 @@ jobs:
 
       - name: Install package with dev extras
         run: pip install -e ".[dev]"
+
+      - name: Verify the interpreter matches the matrix
+        run: |
+          actual="$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          echo "running on Python $actual"
+          if [ "$actual" != "${{ matrix.python-version }}" ]; then
+            echo "::error::matrix asked for Python ${{ matrix.python-version }} but got $actual — refusing to report a pass for the wrong interpreter"
+            exit 1
+          fi
 
       - name: Run pytest
         run: pytest -q
